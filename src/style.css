@@ -1,0 +1,90 @@
+:root {
+  --bg: #14161b;
+  --panel: #1b1e26;
+  --fg: #e6e6e6;
+  --accent: #7bd88f;
+  --muted: #8a8f98;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+}
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid #000;
+}
+
+#topbar h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button {
+  background: #2a2e38;
+  color: var(--fg);
+  border: 1px solid #3a3f4b;
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+#status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#status.error {
+  color: #ff6b6b;
+}
+
+#status.playing {
+  color: var(--accent);
+}
+
+#editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cm-editor {
+  height: 100%;
+  font-size: 15px;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
