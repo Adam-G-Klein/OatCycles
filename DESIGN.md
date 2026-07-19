@@ -204,11 +204,11 @@ Dev loop: `pnpm dev` → Chrome at localhost. Ship loop (later): `electron-vite`
 - **M0 — Scaffold:** Vite app on `@strudel/web`, editor mounted, a pattern plays. Prove
   the plugin seam end-to-end in the browser.
 - **M1 — Vim:** wire `keybindings('vim')` + settings toggle. (Cheap win, validates loop.)
-- **M2 — Voice v1:** capture → YIN → naive segmentation → code insert. Iterate on
   transcription quality.
-- **M3 — MIDI UX:** device picker + `midikeys` snippet surface (Chrome).
-- **M4 — MIDI sustain (core patch):** `superdough` open-ended notes. Vendored fork.
-- **M5 — Electron wrap:** distributable desktop app, permission handlers, `.vimrc` file.
+- **M2 — MIDI UX:** device picker + `midikeys` snippet surface (Chrome).
+- **M3 — Voice v1:** capture → YIN → naive segmentation → code insert. Iterate on
+- **M4 — Electron wrap:** distributable desktop app, permission handlers, `.vimrc` file.
+- **M5 — MIDI sustain (core patch):** `superdough` open-ended notes. Vendored fork.
 - **M6 — Vim advanced:** `.vimrc` parsing, custom keybinds, macro UX.
 
 ---

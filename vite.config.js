@@ -4,7 +4,9 @@ import { defineConfig } from 'vite';
 // (M4 superdough sustain). Keep Vite from crawling its example apps.
 export default defineConfig({
   server: {
-    port: 5173,
+    // Honor an injected PORT (e.g. preview harness) but default to 5173 for
+    // the normal `oat` dev workflow.
+    port: Number(process.env.PORT) || 5173,
     watch: {
       ignored: ['**/strudel-upstream/**'],
     },

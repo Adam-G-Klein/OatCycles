@@ -31,11 +31,27 @@ const strudelReady = initStrudel({
     setStatus('engine failed to init', 'error');
   });
 
+// Vim setting persists across sessions in localStorage; on by default until the
+// user explicitly turns it off.
+const VIM_KEY = 'oat.vimMode';
+const vimSaved = localStorage.getItem(VIM_KEY);
+const vimStored = vimSaved === null ? true : vimSaved === 'true';
+
 const editor = createEditor({
   parent: document.getElementById('editor'),
   initialCode: DEFAULT_CODE,
   onEvaluate: play,
   onStop: stop,
+  vimMode: vimStored,
+});
+
+// Settings toggle: reflect the persisted value, then keep editor + storage in sync.
+const vimCheckbox = document.getElementById('vim-mode');
+vimCheckbox.checked = vimStored;
+vimCheckbox.addEventListener('change', () => {
+  const on = vimCheckbox.checked;
+  localStorage.setItem(VIM_KEY, String(on));
+  editor.setVimMode(on);
 });
 
 async function play(code = editor.getCode()) {

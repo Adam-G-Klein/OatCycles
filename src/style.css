@@ -59,11 +59,33 @@ button:hover {
   border-color: var(--accent);
 }
 
+#vim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+#vim-toggle input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 #status {
   margin-left: auto;
   color: var(--muted);
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* Vim mode status line rendered by @replit/codemirror-vim at the editor foot. */
+.cm-vim-panel {
+  background: var(--panel);
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
 }
 
 #status.error {
