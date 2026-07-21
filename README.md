@@ -4,12 +4,6 @@ A code-driven music composition environment built on [Strudel](https://strudel.c
 adding first-class **Vim**, **voice→code transcription**, and **frictionless MIDI
 keyboard** support. See [DESIGN.md](DESIGN.md) for the full plan.
 
-## Status
-
-**M0 — Scaffold** ✅ — Vite app on `@strudel/web`, CodeMirror editor mounted, a
-pattern plays. The `@strudel/web` plugin seam (`initStrudel` → `evaluate` → `hush`)
-is proven end-to-end in the browser.
-
 ## Run it
 
 From the project directory:
