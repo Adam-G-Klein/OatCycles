@@ -12,13 +12,7 @@ is proven end-to-end in the browser.
 
 ## Run it
 
-One command (from anywhere), using the alias installed in `~/.zshrc`:
-
-```sh
-oat
-```
-
-Or, from the project directory:
+From the project directory:
 
 ```sh
 npm install   # first time only
