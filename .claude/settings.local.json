@@ -4,7 +4,20 @@
       "Read(//Users/adam/**)",
       "Bash(node -e \"const m=require\\('./node_modules/@replit/codemirror-vim/dist/index.cjs'\\); console.log\\('exports:', Object.keys\\(m\\).slice\\(0,20\\)\\)\")",
       "Bash(curl -s http://localhost:5173/)",
-      "Bash(curl -s http://localhost:5173/src/main.js)"
+      "Bash(curl -s http://localhost:5173/src/main.js)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(grep -oE \".{10}commandName.{0,80}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \".{0,60}argString ?=.{0,40}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \".{0,40}\\\\.args ?=.{0,60}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \"matchCommand ?= ?function[^}]{0,400}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \"matchCommand[^\\)]{0,300}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \"commandMap_?\\\\[[^]]*\\\\]|parseInput_?[^\\)]{0,120}|matchCommand_?[^\\)]{0,120}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \".{0,30}\\\\.commandName ?=.{0,60}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(grep -oE \"for.{0,20}in this.commandMap_[^}]{0,300}\" node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(perl -0777 -ne 'if\\(/matchCommand_\\\\\\(commandName\\\\\\)\\\\s*\\\\{\\(.{0,900}?\\)\\\\n\\\\s{4}\\\\}/s\\){print $1}' node_modules/@replit/codemirror-vim/dist/index.js)",
+      "Bash(curl -s https://raw.githubusercontent.com/felixroos/dough-samples/main/tidal-drum-machines.json)"
     ]
   }
 }

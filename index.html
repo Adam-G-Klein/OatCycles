@@ -8,17 +8,53 @@
   <body>
     <header id="topbar">
       <h1>OatCycles</h1>
+      <span id="song-name" title="Double-click to rename (or :name &lt;filename&gt;)">untitled</span>
       <div class="controls">
-        <button id="play" title="Ctrl+Enter">▶ Play</button>
-        <button id="stop" title="Ctrl+.">■ Stop</button>
+        <button id="play" title="Cmd+Enter">▶ Play</button>
+        <button id="stop" title="Cmd+.">■ Stop</button>
       </div>
       <label id="vim-toggle" title="Vim keybindings — :w plays, :q stops, gc comments">
         <input type="checkbox" id="vim-mode" />
         <span>Vim</span>
       </label>
+      <div id="midi" title="MIDI keyboard input (Chrome)">
+        <button id="midi-enable" title="Request Web MIDI access">Enable MIDI</button>
+        <select id="midi-device" disabled>
+          <option value="">MIDI off</option>
+        </select>
+        <button id="midi-insert" title="Insert a midikeys() snippet at the cursor" disabled>
+          + snippet
+        </button>
+        <label id="midi-type-toggle" title="Type played notes into the editor at the cursor">
+          <input type="checkbox" id="midi-type" disabled />
+          <span>Type notes</span>
+        </label>
+        <span id="midi-activity" title="Note-on activity">●</span>
+      </div>
+      <div id="voice" title="Sing a melody → editable Strudel code (Chrome)">
+        <button id="voice-record" title="Record from the mic, then transcribe to code">● Sing</button>
+        <label id="voice-bpm-label" title="Tempo the melody is snapped to">
+          <input type="number" id="voice-bpm" value="120" min="40" max="300" step="1" />
+          <span>BPM</span>
+        </label>
+      </div>
+      <button id="songs-toggle" title="Saved songs (:o)">☰ Songs</button>
       <span id="status">booting…</span>
     </header>
-    <main id="editor"></main>
+    <div id="workspace">
+      <main id="editor"></main>
+      <aside id="song-panel" tabindex="-1" aria-label="Saved songs">
+        <div id="song-panel-header">
+          <span>Songs</span>
+          <button id="song-new" title="New song (:new)">＋</button>
+        </div>
+        <ul id="song-list"></ul>
+        <div id="song-panel-hint">j/k move · gg/G ends · ⏎ open · dd delete · esc close</div>
+      </aside>
+    </div>
+    <div id="keyboard-ref" title="Keyboard reference (:kyb / :nkyb)" hidden>
+      <img src="/keyboardImg.jpg" alt="Keyboard reference" />
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -3,3 +3,7 @@ dist/
 .DS_Store
 *.log
 strudel-upstream/
+
+# On-disk song files written by the app (personal content). Un-ignore this if
+# you'd like to version/back-up your songs alongside the code.
+songs/

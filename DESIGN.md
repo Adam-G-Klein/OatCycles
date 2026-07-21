@@ -133,6 +133,50 @@ localStorage. Parse a subset of vimrc into `Vim.map` / `Vim.mapCommand` calls. M
 (`q`) already work via the underlying extension — expose/document them.
 **Risk:** low. The hard part (modal editing engine) is a maintained dependency.
 
+**OatCycles vim overrides (living reference).** Everything OatCycles layers on top of
+stock `@replit/codemirror-vim`. Keep this table current whenever a binding is added —
+before adding a new ex-command, confirm it doesn't collide with a stock one (stock
+o-prefixed commands are only `omap`/`onoremap`/`omapclear`; there is no stock `open`,
+`name`, or `edit`).
+
+| Binding | Mode | Action | Defined in |
+|---|---|---|---|
+| `:w` | ex | Play / evaluate the buffer (mirrors Cmd+Enter) | `editor/editor.js` |
+| `:q` | ex | Stop playback (mirrors Cmd+.) | `editor/editor.js` |
+| `:o` | ex | Open the songs side panel | `editor/editor.js` → `songs/songs.js` |
+| `:name <filename>` | ex | Rename the current song | `editor/editor.js` → `songs/songs.js` |
+| `:new [name]` | ex | Start a fresh (blank) song; auto-names if omitted | `editor/editor.js` → `songs/songs.js` |
+| `gc` | normal + visual | Toggle line comment | `editor/editor.js` |
+| `kj` | insert | Escape to normal mode | `editor/editor.js` |
+
+Inside the songs panel (a plain DOM element, not CodeMirror — its keys are handled by a
+local keydown listener, not the vim extension): `j`/`k` move, `gg`/`G` jump to ends,
+`Enter` opens the highlighted song, `dd` deletes it (with confirm), `Esc` closes.
+
+### 5.1b Song file system (disk-backed persistence)
+Answers open question §8.2. A collapsible right-side panel lists saved songs, persisted
+as **real text files on disk** with `localStorage` as a fast boot cache / offline
+fallback.
+- **On-disk layout (`./songs`):** one `<name>.js` text file per song holding exactly the
+  code (human-readable, git-friendly), plus `index.json` — a manifest of
+  `[{id, name, file, updatedAt}]`. Served by a small Vite dev/preview middleware
+  (`vite-songs-plugin.js`) at `GET/PUT /api/songs`. See `src/songs/storage.js`.
+- **Auto-save on play / move:** every evaluate flushes the buffer into the current song;
+  also flushed just before switching/creating/renaming/deleting so nothing typed since
+  the last play is lost. Each save writes `localStorage` synchronously and the disk files
+  (debounced), with a `sendBeacon` flush on page unload so the last edit survives a close.
+- **Load on session start:** the app reads the on-disk songs first (source of truth) and
+  refreshes the `localStorage` mirror. If the server is unreachable (a plain static
+  `vite build`) it falls back to the mirror; if the disk is empty but the mirror has
+  songs, they're migrated to disk once.
+- **Current file** shown in the topbar; double-click (or `:name`) to rename (renames the
+  file on disk too).
+- **Open** replaces the buffer with the selected song's code (saving the current first).
+**Why disk:** `localStorage` alone is evicted when the browser is cleared — songs were
+lost that way. Files on disk survive browser resets and can be edited/backed-up outside
+the app. Electron (M4) can reuse the same `/api/songs` shape against the native FS.
+**Risk:** low. Dev-server middleware + a thin fetch layer; no engine coupling.
+
 ### 5.2 MIDI keyboard (integration exists; sustain is the work)
 **Phase 1:** surface `midikeys()` in the UI — device picker, "insert midikeys snippet",
 live activity indicator. Works today in Chrome.
@@ -222,8 +266,12 @@ Dev loop: `pnpm dev` → Chrome at localhost. Ship loop (later): `electron-vite`
   only. (§5.3)
 - ✅ **Transcription quality bar:** proof-of-concept; understandability over accuracy. (§5.3)
 
+- ✅ **Persistence/format:** songs saved as text files on disk (`./songs/<name>.js` +
+  `index.json` manifest) via a Vite dev/preview API, with `localStorage` as a boot cache
+  / offline fallback. Auto-saved on play and before any switch/create/rename/delete.
+  In-browser song panel with vim navigation. (§5.1b) Electron (M4) can reuse the same
+  `/api/songs` shape against the native FS.
+
 **Still open:**
 1. **Core-patch maintenance:** M4 patches `superdough`. How do we track upstream? (Vendor
    + patch set, or maintain a real fork branch.) — defer until M4.
-2. **Persistence/format:** how do songs/sessions get saved (files, localStorage,
-   `my-patterns/`-style)? — defer; not needed for M0–M2.
