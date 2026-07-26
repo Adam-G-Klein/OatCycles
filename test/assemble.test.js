@@ -30,13 +30,20 @@ test('a number is stringified', () => {
 });
 
 test('anything else throws, naming the hole and the type', () => {
-  class Pattern {}
   assert.throws(() => assemble(META, [{}]), /hole 1 .*expected a string or number.*got Object/);
-  assert.throws(() => assemble(META, [new Pattern()]), /got Pattern/);
   assert.throws(() => assemble(META, [undefined]), /got undefined/);
   assert.throws(() => assemble(META, [null]), /got null/);
   assert.throws(() => assemble(META, [['a']]), /got Array/);
   assert.throws(() => assemble(META, [true]), /got boolean/);
+});
+
+test('a Pattern in a hole says how to fix it', () => {
+  // The easy mistake, and the one the songs walk straight into: every
+  // double-quoted string is mini-notation, so `const arr = ["e3", "g3"]` holds
+  // patterns, not text. Duck-typed, because @strudel/web ships minified.
+  const pattern = { queryArc: () => [], fmap: () => pattern };
+  assert.throws(() => assemble(META, [pattern]), /got Pattern/);
+  assert.throws(() => assemble(META, [pattern]), /single quotes/);
 });
 
 test('a number that is not finite is not text either', () => {

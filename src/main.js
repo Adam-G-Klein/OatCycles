@@ -1,17 +1,29 @@
 import './style.css';
-import { initStrudel, evaluate, hush, samples } from '@strudel/web';
+import {
+  initStrudel,
+  evaluate,
+  hush,
+  samples,
+  getSuperdoughAudioController,
+  resetGlobalEffects,
+} from '@strudel/web';
 // General MIDI soundfonts (gm_acoustic_bass, gm_acoustic_grand_piano, gm_*, etc.).
 // NB: we import registerSoundfonts from our OWN module, not @strudel/soundfonts.
 // @strudel/soundfonts registers into a second copy of @strudel/webaudio, which
 // the @strudel/web engine never reads — so its gm_* sounds come out silent.
 // Our version registers through @strudel/web's registry. See sounds/soundfonts.js.
 import { registerSoundfonts } from './sounds/soundfonts.js';
+import { createSilentMode } from './silent.js';
+import { panicAudio } from './panic.js';
 import { Drawer, getDrawContext } from '@strudel/draw';
 import { createEditor } from './editor/editor.js';
 import { setupCheatsheet } from './editor/cheatsheet.js';
+import { setupBanks, bankSnippet } from './editor/banks.js';
 import { registerSliders } from './editor/slider.js';
+import { expandInterpolations, mapOffset } from './lang/interpolate.js';
+import { registerMiniTemplates, setLocationSink, resetSites } from './lang/mini-template.js';
 import { registerWidgets, clearWidgetCanvases } from './editor/widget.js';
-import { setupMidiPanel } from './midi/midi.js';
+import { setupMidiPanel, panicMidi } from './midi/midi.js';
 import { setupVoicePanel } from './voice/voice.js';
 import { setupSongsPanel } from './songs/songs.js';
 import { writeOut } from './songs/writeout.js';
@@ -28,6 +40,30 @@ note("c3 eb3 g3 bb3")
   .lpq(8)
   .gain(0.7)
   .slow(2)`;
+
+// --- silent / agent mode ------------------------------------------------------
+//
+// Two ways to stop the app making noise on someone's machine:
+//
+//   1. The 🔇 Play button / window.oat.silentPlay() — a one-off muted play.
+//      Pressing normal Play afterwards always un-mutes, so you can never end up
+//      wondering why there's no sound.
+//   2. ?agent=1 — a whole-session mode. EVERY play is muted and NOTHING is
+//      written to disk — not a snapshot, not a :save — no matter which control
+//      gets pressed. This is the one that's actually robust against an
+//      automated caller clicking the wrong button, which is exactly how a real
+//      composition got overwritten once.
+//
+// Agent mode is deliberately URL-only and never persisted: it must not be able
+// to leak into a normal composing session.
+const AGENT_MODE = new URLSearchParams(location.search).get('agent') === '1';
+
+const silentMode = createSilentMode();
+
+if (AGENT_MODE) {
+  document.getElementById('agent-banner').hidden = false;
+  document.body.classList.add('agent-mode');
+}
 
 const statusEl = document.getElementById('status');
 
@@ -76,12 +112,28 @@ const DRAW_TIME = [-2, 2];
 let drawContext = null;
 const fullScreenContext = () => (drawContext ??= getDrawContext());
 
+// `${…}` interpolation (see lang/interpolate.js) rewrites the buffer before the
+// transpiler runs, which moves every offset after a hole. The transpiler then
+// reports mini-notation and widget positions in *its* coordinates, so the map
+// from the last rewrite is what puts them back on the user's characters.
+let sourceMap = null;
+
+// Highlighting now has two sources: the locations the transpiler found in the
+// buffer, which hold still, and the ranges an interpolated string occupies this
+// cycle, which do not. The editor gets the union of the two.
+let staticLocations = [];
+let dynamicLocations = [];
+const pushLocations = () => editor.updateMiniLocations([...staticLocations, ...dynamicLocations]);
+
 // Boot the Strudel engine (audio + REPL). This is the @strudel/web seam:
 // initStrudel() → evaluate(code) → hush().
 const strudelReady = initStrudel({
   // Report transport state, and start/stop the highlight loop with playback.
   onToggle: (started) => {
-    setStatus(started ? '● playing' : 'stopped', started ? 'playing' : '');
+    // Say so when nothing is reaching the speakers — otherwise a muted play
+    // looks exactly like a broken one.
+    const playing = silentMode.silent ? '● playing (muted)' : '● playing';
+    setStatus(started ? playing : 'stopped', started ? 'playing' : '');
     if (started) {
       scheduler && drawer?.start(scheduler);
     } else {
@@ -96,9 +148,22 @@ const strudelReady = initStrudel({
   // After each eval, refresh the mini-notation locations the transpiler found
   // and re-seed the drawer so highlighting matches the new pattern.
   afterEval: ({ pattern, meta }) => {
-    editor.updateMiniLocations(meta?.miniLocations || []);
-    editor.updateSliders(meta?.widgets || []);
-    editor.updateWidgets(meta?.widgets || []);
+    staticLocations = (meta?.miniLocations || []).map(([from, to]) => [
+      mapOffset(sourceMap, from),
+      mapOffset(sourceMap, to),
+    ]);
+    pushLocations();
+    // A slider's *identity* is its offset in the transpiled code — the
+    // transpiler mints sliderWithID('slider_<offset>') — so the widget carries
+    // that offset alongside the document position it is drawn at.
+    const widgets = (meta?.widgets || []).map((widget) => ({
+      ...widget,
+      srcFrom: widget.from,
+      from: widget.from == null ? widget.from : mapOffset(sourceMap, widget.from),
+      to: widget.to == null ? widget.to : mapOffset(sourceMap, widget.to),
+    }));
+    editor.updateSliders(widgets);
+    editor.updateWidgets(widgets);
     // Widen the drawer's window only if this pattern actually has something to
     // visualize — querying two cycles ahead every frame isn't free, and plain
     // highlighting has no use for the haps it would return.
@@ -119,6 +184,9 @@ const strudelReady = initStrudel({
     // in @strudel/web defines — it has to be in the eval scope before the first
     // evaluate(), and prebake is the last thing awaited before we're ready.
     await registerSliders();
+    // Same deadline for oatMini(), which our own pre-pass writes into the code
+    // wherever a mini string has a ${…} hole (see lang/interpolate.js).
+    await registerMiniTemplates();
     // Same deadline for the visualizers: until their types are registered the
     // transpiler doesn't recognise ._punchcard(…) as a widget call at all.
     registerWidgets();
@@ -144,17 +212,31 @@ const strudelReady = initStrudel({
     setStatus('engine failed to init', 'error');
   });
 
+// Errors thrown while *querying* a pattern — a ${…} hole that throws, a string
+// that no longer parses as mini-notation — never reach onEvalError: the
+// scheduler catches them per tick, logs them and keeps ticking (cyclist.mjs).
+// Without this they're console-only, and the pattern just goes quiet for no
+// visible reason. @strudel/core's logger dispatches them as a document event.
+document.addEventListener('strudel.log', (event) => {
+  const message = event.detail?.message ?? '';
+  if (message.includes('error:')) setStatus(message, 'error');
+});
+
 // Vim setting persists across sessions in localStorage; on by default until the
 // user explicitly turns it off.
 const VIM_KEY = 'oat.vimMode';
 const vimSaved = localStorage.getItem(VIM_KEY);
 const vimStored = vimSaved === null ? true : vimSaved === 'true';
 
-// The bottom dock: one preview at a time, either the reference keyboard (:kyb /
-// :nkyb) or the mini-notation cheatsheet (:mini / :nmini). They share the space,
-// so showing one hides the other.
+// The bottom dock: one preview at a time — the reference keyboard (:kyb /
+// :nkyb), the mini-notation cheatsheet (:mini / :nmini), or the list of sample
+// banks on this machine (:banks / :nbanks). They share the space, so showing
+// one hides the other two.
 const keyboardRef = document.getElementById('keyboard-ref');
 const cheatsheet = setupCheatsheet(document.getElementById('mini-ref'));
+const banks = setupBanks(document.getElementById('banks-ref'), {
+  onPick: (bank) => peruseBank(bank),
+});
 
 const editor = createEditor({
   parent: document.getElementById('editor'),
@@ -163,6 +245,7 @@ const editor = createEditor({
   onStop: stop,
   onShowKeyboard: () => {
     cheatsheet.hide();
+    banks.hide();
     keyboardRef.hidden = false;
     editor.focus();
   },
@@ -172,6 +255,7 @@ const editor = createEditor({
   },
   onShowMini: () => {
     keyboardRef.hidden = true;
+    banks.hide();
     cheatsheet.show();
     editor.focus();
   },
@@ -179,8 +263,25 @@ const editor = createEditor({
     cheatsheet.hide();
     editor.focus();
   },
+  onShowBanks: () => {
+    keyboardRef.hidden = true;
+    cheatsheet.hide();
+    banks.show();
+    editor.focus();
+  },
+  onHideBanks: () => {
+    banks.hide();
+    editor.focus();
+  },
   onStatus: (text, kind) => setStatus(text, kind),
   vimMode: vimStored,
+});
+
+// An interpolated string reports the ranges it occupies whenever its assembled
+// text changes — which, for most patterns, is never after the first cycle.
+setLocationSink((locations) => {
+  dynamicLocations = locations;
+  pushLocations();
 });
 
 // The Drawer syncs an animation-frame loop to the scheduler's clock. It starts
@@ -260,16 +361,21 @@ const session = createSession({
   },
 });
 
-// Songs panel: on-disk file system for saved works. Restores the last-open
-// song into the editor on load (read from ./songs text files via /api/songs,
-// falling back to the localStorage mirror), auto-saves on every play, and
-// drives the collapsible right-side list. Vim commands (:o open, :name rename,
-// :new) route through here. Setup is async because it reads songs from disk.
+// Songs panel: on-disk file system for saved works. Restores the last-open song
+// into the editor on load (read from ./SavedSongs text files via /api/songs,
+// falling back to the localStorage mirror) and drives the collapsible
+// right-side list. Every play snapshots the buffer into ./AutoSaves, which
+// never touches a saved file — only :save writes one. Vim commands (:o open,
+// :name rename, :new, :save) route through here. Setup is async because it
+// reads songs from disk.
 let songs = null;
 const songsReady = setupSongsPanel({
   panel: document.getElementById('song-panel'),
   listEl: document.getElementById('song-list'),
   newBtn: document.getElementById('song-new'),
+  titleEl: document.getElementById('song-panel-title'),
+  cmdEl: document.getElementById('song-cmdline'),
+  hintEl: document.getElementById('song-panel-hint'),
   filenameEl: document.getElementById('song-name'),
   getCode: () => editor.getCode(),
   setCode: (code) => editor.setCode(code),
@@ -278,7 +384,10 @@ const songsReady = setupSongsPanel({
   // Networked play: while a session owns the buffer, switching songs would
   // replace everyone's work, and a guest must not write to disk at all.
   sessionLock: () => (session.active ? 'in session — :leave to switch songs' : null),
-  suppressSave: () => session.role === 'guest',
+  // Guests never write to the host's disk; neither does an agent session. This
+  // is the belt to play()'s braces — it also covers the saves triggered by
+  // switching, renaming and creating songs, not just the one on play.
+  suppressSave: () => session.role === 'guest' || AGENT_MODE,
   onRename: (name) => session.active && session.setSongName(name),
 }).then((api) => {
   songs = api;
@@ -287,11 +396,40 @@ const songsReady = setupSongsPanel({
     onRenameSong: (name) => songs.renameCurrent(name),
     onNewSong: (name) => songs.newSong(name),
     onCopySong: () => songs.copyCurrent(),
+    onSaveSong: (name) => songs.saveCurrent(name),
     onWriteOut: (argString) => writeOutCurrent(argString),
   });
   document.getElementById('songs-toggle').addEventListener('click', () => songs.toggle());
   return api;
 });
+
+// --- :banks ------------------------------------------------------------------
+//
+// Picking a bank from the :banks panel. Perusing a bank means putting a
+// samples() call in a buffer and running :peruse over it, which is a change to
+// whatever you were writing — so it happens in a file of its own, and the song
+// you were on is snapshotted first.
+//
+// Both of those touch the user's work, so they are behind a confirm: the
+// listing is browsable without consequence, and the click is the moment you opt
+// in. Nothing here plays anything.
+async function peruseBank(bank) {
+  await songsReady;
+  const from = songs?.currentName() ?? 'this song';
+  const ok = window.confirm(
+    `Autosave “${from}” and peruse “${bank.name}” in a new file?\n\n` +
+      'The new file gets a samples() call for the bank and a :peruse index of' +
+      ' everything in it. Nothing plays until you press play.',
+  );
+  if (!ok) {
+    editor.focus();
+    return;
+  }
+  // newSong returns null when a session refuses the switch, having already said
+  // so in the topbar — there is no new buffer to peruse in that case.
+  if (!songs?.newSong(`peruse ${bank.name}`, { code: bankSnippet(bank) })) return;
+  await editor.peruseBuffer();
+}
 
 // --- :writeout ---------------------------------------------------------------
 //
@@ -486,22 +624,102 @@ editor.setSessionCommands({
   onLeaveSession: leaveSession,
 });
 
-async function play(code = editor.getCode()) {
+// `silent` mutes the master output for this play and skips the autosave, so an
+// automated caller can neither be heard nor leave snapshots of its own test
+// code among the user's.
+// A normal play always clears the mute — silence is never sticky by accident.
+// Under ?agent=1 every play is silent regardless of what the caller asked for.
+async function play(code = editor.getCode(), { silent = false } = {}) {
+  const quiet = silent || AGENT_MODE;
   try {
     await songsReady; // ensure the disk-loaded song is current before saving
-    songs?.autoSaveCurrent(); // persist the current buffer to its file on every play
+    // Snapshot the buffer into AutoSaves/ on every play — except a silent one,
+    // whose whole point is to leave the user's work untouched. The song's own
+    // file is not written here; :save is the only thing that writes it.
+    if (!quiet) songs?.autoSaveCurrent();
     await strudelReady;
-    await evaluate(code);
+    // Mute BEFORE evaluating: evaluate() starts the scheduler, and a gap here
+    // is an audible gap. If the graph isn't up we refuse rather than play loud.
+    if (!silentMode.set(quiet) && quiet) {
+      setStatus('audio not ready — refusing to play unmuted', 'error');
+      return;
+    }
+    // ${…} holes in mini strings are ours, not Strudel's: rewrite them out
+    // before the transpiler runs (see lang/interpolate.js). Everything after a
+    // hole shifts, so keep the map that puts the transpiler's offsets back into
+    // document coordinates, and drop the previous eval's dynamic locations.
+    const expanded = expandInterpolations(code);
+    sourceMap = expanded.map;
+    resetSites();
+    await evaluate(expanded.code);
   } catch (err) {
     console.error(err);
     setStatus('eval error: ' + err.message, 'error');
   }
 }
 
+// Stop is two-stage. The first press stops the transport, which is all a
+// running pattern needs. But hush() only stops *new* events from being
+// triggered — a long release, a slow pad or a reverb tail keeps ringing after
+// it, so Stop can look like it did nothing. Pressing Stop again, with the
+// transport already down, is the panic: cut everything still sounding, audio
+// and MIDI both.
 function stop() {
-  hush();
-  setStatus('stopped');
+  if (scheduler?.started) {
+    hush();
+    setStatus('stopped');
+    return;
+  }
+  return panic();
+}
+
+async function panic() {
+  // Hardware MIDI leaves the machine entirely, so the audio panic can't reach
+  // it. Fire it first, and don't let it hold up (or sink) the audio side.
+  try {
+    panicMidi();
+  } catch (err) {
+    console.error(err);
+  }
+  // Nothing can be sounding before the engine is up, and asking superdough for
+  // its controller would build one — plus an AudioContext — just to tear down.
+  if (scheduler) {
+    await panicAudio({
+      controller: getSuperdoughAudioController(),
+      reset: resetGlobalEffects,
+    });
+    // The teardown rebuilds destinationGain from scratch, so the mute has to be
+    // re-applied to the new node: otherwise a panic would un-mute an agent
+    // session, and the next silentPlay would come out of the speakers.
+    silentMode.set(silentMode.silent);
+  }
+  setStatus('all sound cut');
 }
 
 document.getElementById('play').addEventListener('click', () => play());
+document.getElementById('play-silent').addEventListener('click', () =>
+  play(undefined, { silent: true }),
+);
 document.getElementById('stop').addEventListener('click', stop);
+
+// --- agent API ----------------------------------------------------------------
+//
+// The scripting seam an automated caller should drive instead of clicking.
+// Clicking is how this went wrong before: a mis-aimed click hit Play, which
+// made noise AND autosaved a test snippet over a real song.
+//
+// silentPlay(code?) — evaluate muted. Passing a string evaluates THAT code
+// without touching the editor buffer at all, which is the safest path: the
+// user's document is never modified, so there is nothing to save or restore.
+window.oat = {
+  silentPlay: (code) => play(code, { silent: true }),
+  stop,
+  // Cut everything still ringing, without needing the transport to be down
+  // first — what a second press of Stop does.
+  panic,
+  getCode: () => editor.getCode(),
+  get silent() {
+    return silentMode.silent;
+  },
+  agentMode: AGENT_MODE,
+};

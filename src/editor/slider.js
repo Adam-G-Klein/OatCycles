@@ -54,9 +54,13 @@ const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?/i;
 const setSliders = StateEffect.define();
 
 class SliderWidget extends WidgetType {
-  constructor({ from, value, min, max, step }) {
+  // `from` is where the widget is drawn, in the document. `srcFrom` is the
+  // offset the transpiler saw, which is what it minted the id from — the two
+  // differ once ${…} interpolation has rewritten the code (lang/interpolate.js),
+  // and it's the id that has to match for a drag to reach the pattern.
+  constructor({ from, srcFrom, value, min, max, step }) {
     super();
-    this.id = sliderID(from);
+    this.id = sliderID(srcFrom ?? from);
     this.value = value; // the literal as written, so the thumb starts where the code says
     this.min = min ?? 0;
     this.max = max ?? 1;

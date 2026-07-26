@@ -14,10 +14,19 @@
 // the string's text starts. `e` carries, per chunk, the chunk-relative indices
 // where a `\${` lost its backslash; it is omitted when there are none.
 
+// A Pattern is the mistake worth predicting, and by far the easiest one to
+// make: every double-quoted string in the buffer is mini-notation, so
+// `const arr = ["e3", "g3"]` is an array of *patterns*, and `${arr[i]}` has no
+// text in it at all. Duck-typed rather than by class — @strudel/web ships
+// minified, so constructor names there are single letters.
+const isPattern = (value) =>
+  typeof value?.queryArc === 'function' && typeof value?.fmap === 'function';
+
 const typeName = (value) => {
   if (value === null) return 'null';
   if (Array.isArray(value)) return 'Array';
   if (typeof value === 'number') return String(value); // NaN, Infinity
+  if (isPattern(value)) return 'Pattern';
   if (typeof value === 'object' || typeof value === 'function') {
     return value.constructor?.name ?? 'Object';
   }
@@ -32,8 +41,11 @@ const typeName = (value) => {
 function holeText(value, index) {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  const hint = isPattern(value)
+    ? " — a double-quoted string is already mini-notation, so write text you mean to splice in single quotes: ['e3', 'g3']"
+    : '';
   throw new Error(
-    `hole ${index + 1} in mini string: expected a string or number, got ${typeName(value)}`,
+    `hole ${index + 1} in mini string: expected a string or number, got ${typeName(value)}${hint}`,
   );
 }
 
