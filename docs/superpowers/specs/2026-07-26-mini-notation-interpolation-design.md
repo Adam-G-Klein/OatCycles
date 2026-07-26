@@ -220,10 +220,10 @@ Both use the `map` from the most recent `expandInterpolations`, stashed by
 
 ## Testing
 
-Vitest as a devDependency and an `npm test` script; the repo has no runner
-today. Everything under test is pure — no audio context, no editor.
+`node --test` with the rest of `test/` — no new dependency. Everything under
+test is pure — no audio context, no editor.
 
-`interpolate.test.js`
+`test/interpolate.test.js`
 - holes found in `"…"` and `` `…` ``; `\${` escaped; `${` with no closer is
   literal text
 - tagged templates and `mini-off` regions left alone; strings with no hole left
@@ -235,7 +235,9 @@ today. Everything under test is pure — no audio context, no editor.
 - generated chunks are single-quoted and escape `'` and `\`
 - a syntax error propagates unchanged
 
-`mini-template.test.js`
+`test/mini-template.test.js` (the pure half: assembly, checking, the cycle memo
+and the location mapper are exported and take their engine handles as
+arguments, the way `src/panic.js` does)
 - assembly from chunks and values; numbers stringified; a float, a negative
 - a non-string, non-number hole throws naming the hole index and the type;
   `NaN`/`Infinity` rejected
