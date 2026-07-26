@@ -61,11 +61,23 @@ one of them would be ceremony.
 Everything else throws, naming the hole and what it got:
 
 ```
-hole 2 in mini string: expected a string or number, got Pattern
+hole 2 in mini string: expected a string or number, got Pattern — a
+double-quoted string is already mini-notation, so write text you mean to
+splice in single quotes: ['e3', 'g3']
 ```
 
-`Pattern` is the mistake worth predicting: `${pick(arr, i)}` returns a pattern,
-not text. The message names the type so the fix is obvious.
+A `Pattern` is not a corner case, it is the mistake almost everyone will make
+first. Every double-quoted string in the buffer is mini-notation, so the songs'
+existing idiom —
+
+```js
+const bassNotes = ["[0, 8]", "[f1, f2]"];
+```
+
+— is an array of *patterns*, and `${bassNotes[i]}` has no text in it at all. So
+the check names the fix, not just the type. (The test is duck-typed on
+`queryArc`/`fmap`: `@strudel/web` ships minified, so a Pattern's constructor
+name there is two letters.)
 
 ### Where the work happens
 
