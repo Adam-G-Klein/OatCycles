@@ -235,9 +235,9 @@ test is pure — no audio context, no editor.
 - generated chunks are single-quoted and escape `'` and `\`
 - a syntax error propagates unchanged
 
-`test/mini-template.test.js` (the pure half: assembly, checking, the cycle memo
-and the location mapper are exported and take their engine handles as
-arguments, the way `src/panic.js` does)
+`test/assemble.test.js` — the pure half lives in `src/lang/assemble.js` so it
+can be imported under node; `src/lang/mini-template.js` holds everything that
+needs the engine and is verified in the app, the way `src/panic.js` splits.
 - assembly from chunks and values; numbers stringified; a float, a negative
 - a non-string, non-number hole throws naming the hole index and the type;
   `NaN`/`Infinity` rejected
