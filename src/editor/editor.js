@@ -1,13 +1,18 @@
-import { EditorView, basicSetup } from 'codemirror';
+import { EditorView } from 'codemirror';
 import { keymap } from '@codemirror/view';
 import { Prec, Compartment, EditorState } from '@codemirror/state';
-import { toggleComment } from '@codemirror/commands';
+import { toggleComment, history, historyKeymap, undo, redo } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { vim, Vim } from '@replit/codemirror-vim';
+import { basicSetupNoHistory } from './setup.js';
 import { highlightExtension, updateMiniLocations, highlightMiniLocations } from './highlight.js';
+import { sliderExtension, updateSliders } from './slider.js';
+import { widgetExtension, updateWidgets } from './widget.js';
 import { docHoverTooltip } from './docs.js';
+import { linkExtension } from './links.js';
+import { peruse } from './peruse.js';
 import { formatCode } from './format/format.js';
 import { formatConfig } from './format/config.js';
 
@@ -28,18 +33,26 @@ const tn = {
   teal: '#73daca',
   gutter: '#3b4261',
   selection: '#283457',
-  activeLine: '#1e202e',
+  // Translucent rather than the flat #1e202e it resolves to over --bg, so the
+  // cursor's line doesn't mask the visualizer canvas behind the editor.
+  activeLine: 'rgba(192, 202, 245, 0.04)',
 };
 
+// The code area is deliberately transparent, so the full-screen visualizer
+// canvas behind it (see main.js) can be seen through the code. The page's --bg
+// is the same #1a1b26 this theme would otherwise paint, so with nothing drawing
+// it looks exactly as it did — but anything opaque stacked in front of the
+// canvas would punch a hole in the picture, hence the translucent active line
+// and the transparent gutters.
 const tokyoNightTheme = EditorView.theme(
   {
-    '&': { color: tn.fg, backgroundColor: tn.bg },
+    '&': { color: tn.fg, backgroundColor: 'transparent' },
     '.cm-content': { caretColor: tn.fg },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: tn.fg },
     '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
       { backgroundColor: tn.selection },
     '.cm-activeLine': { backgroundColor: tn.activeLine },
-    '.cm-gutters': { backgroundColor: tn.bg, color: tn.gutter, border: 'none' },
+    '.cm-gutters': { backgroundColor: 'transparent', color: tn.gutter, border: 'none' },
     '.cm-activeLineGutter': { backgroundColor: tn.activeLine, color: tn.fg },
     '.cm-lineNumbers .cm-gutterElement': { color: tn.gutter },
     '.cm-selectionMatch': { backgroundColor: '#283457' },
@@ -106,10 +119,23 @@ const handlers = {
   onRenameSong: null,
   onNewSong: null,
   onCopySong: null,
+  onWriteOut: null,
   onShowKeyboard: null,
   onHideKeyboard: null,
+  onShowMini: null,
+  onHideMini: null,
   onFormat: null,
+  onPeruse: null,
   onStatus: null,
+  // Networked play: set while a multiplayer session is live, null when solo.
+  // Undo has to delegate through these rather than use CodeMirror's stock
+  // history, which under a CRDT would undo a collaborator's typing. See
+  // src/editor/setup.js and NETWORKED-PLAY.md §5.2.
+  sessionUndo: null,
+  sessionRedo: null,
+  onHostSession: null,
+  onJoinSession: null,
+  onLeaveSession: null,
 };
 
 function registerVimCommands() {
@@ -155,11 +181,61 @@ function registerVimCommands() {
   // lines) intent maps here rather than to a partial abbreviation.
   Vim.defineEx('copy', 'copy', () => handlers.onCopySong?.());
 
+  // :writeout [path] — write the current buffer to an arbitrary file on disk,
+  // for redundancy (a git repo, a synced folder, a backup dir). argString
+  // rather than args, so paths with spaces survive. With no path it reuses the
+  // last one used for this song (see main.js).
+  //
+  // Full name as the ex-prefix, so `:w` (evaluate) and `:wq` keep their own
+  // entries — vim's ex matcher takes the longest defined prefix of the input.
+  Vim.defineEx('writeout', 'writeout', (cm, params) => handlers.onWriteOut?.(params.argString));
+
   // :kyb — show the reference keyboard docked at the bottom of the screen.
   // :nkyb — hide it again. Both use their full names as the ex-prefix so `:k`
   // (stock vim's mark command) is left untouched.
   Vim.defineEx('kyb', 'kyb', () => handlers.onShowKeyboard?.());
   Vim.defineEx('nkyb', 'nkyb', () => handlers.onHideKeyboard?.());
+
+  // :mini — show the mini-notation cheatsheet in the same bottom dock as the
+  // reference keyboard (the two are mutually exclusive; see main.js). :nmini
+  // hides it. Full names as the ex-prefixes, so `:m` (stock vim's move) and
+  // `:n` (next) are left alone.
+  Vim.defineEx('mini', 'mini', () => handlers.onShowMini?.());
+  Vim.defineEx('nmini', 'nmini', () => handlers.onHideMini?.());
+
+  // :peruse — append (or refresh) a browsable index of every sound the file's
+  // samples() calls import. See src/editor/peruse.js. Full name as the
+  // ex-prefix: `:p` is stock vim's :print, and this is not that.
+  Vim.defineEx('peruse', 'peruse', () => handlers.onPeruse?.());
+
+  // --- networked play ------------------------------------------------------
+
+  // u / Ctrl-r. Vim's own undo/redo actions live inside @replit/codemirror-vim,
+  // not in our keymap, so they have to be re-bound here rather than filtered
+  // out of a keymap array. In a session they route to Yjs's UndoManager (which
+  // is scoped by transaction origin, so it only undoes *your* edits); solo they
+  // fall through to CodeMirror's ordinary history. Vim's `_mapCommand` unshifts
+  // onto the front of the default keymap, so these win over the stock bindings.
+  //
+  // Only the normal-mode `u` is remapped — in visual mode `u` is vim's
+  // lowercase operator, which we leave alone.
+  Vim.defineAction('oatUndo', (cm) => {
+    if (handlers.sessionUndo) handlers.sessionUndo();
+    else if (cm.cm6) undo(cm.cm6);
+  });
+  Vim.defineAction('oatRedo', (cm) => {
+    if (handlers.sessionRedo) handlers.sessionRedo();
+    else if (cm.cm6) redo(cm.cm6);
+  });
+  Vim.mapCommand('u', 'action', 'oatUndo', {}, { context: 'normal' });
+  Vim.mapCommand('<C-r>', 'action', 'oatRedo', {}, { context: 'normal' });
+
+  // :host / :join <room> [passphrase] / :leave — multiplayer, from the keyboard.
+  // NB `:join` (and so `:j`) shadows stock vim's join-lines ex-command; normal
+  // mode `J` still joins lines, which is how anyone actually does it.
+  Vim.defineEx('host', 'host', () => handlers.onHostSession?.());
+  Vim.defineEx('join', 'join', (cm, params) => handlers.onJoinSession?.(params.argString));
+  Vim.defineEx('leave', 'leave', () => handlers.onLeaveSession?.());
 }
 
 export function createEditor({
@@ -169,6 +245,8 @@ export function createEditor({
   onStop,
   onShowKeyboard,
   onHideKeyboard,
+  onShowMini,
+  onHideMini,
   onStatus,
   vimMode = false,
 }) {
@@ -176,6 +254,8 @@ export function createEditor({
   handlers.onStop = onStop;
   handlers.onShowKeyboard = onShowKeyboard;
   handlers.onHideKeyboard = onHideKeyboard;
+  handlers.onShowMini = onShowMini;
+  handlers.onHideMini = onHideMini;
   handlers.onStatus = onStatus;
   registerVimCommands();
 
@@ -207,21 +287,50 @@ export function createEditor({
   const vimCompartment = new Compartment();
   const vimExtension = () => [vim(), EditorState.allowMultipleSelections.of(true)];
 
+  // Networked play needs three more compartments (NETWORKED-PLAY.md §5):
+  //
+  //   collab   — the yCollab extension for the live session: remote cursors,
+  //              selections, and Yjs-scoped undo. Empty when solo.
+  //   history  — CodeMirror's stock undo history. On when solo, OFF during a
+  //              session, where a linear document-state log would happily undo
+  //              a collaborator's typing. (This is why basicSetup is expanded
+  //              into setup.js without it — see that file's header.)
+  //   lock     — read-only, used for a guest's "connecting…" window before the
+  //              first remote update lands.
+  let collabActive = false;
+  let readOnly = false;
+  const collabCompartment = new Compartment();
+  const historyCompartment = new Compartment();
+  const lockCompartment = new Compartment();
+  const historyExtension = () => [history(), keymap.of(historyKeymap)];
+  const lockExtension = () => [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+
   const view = new EditorView({
     doc: initialCode,
     parent,
     extensions: [
       vimCompartment.of(vimMode ? vimExtension() : []),
       strudelKeymap,
-      basicSetup,
+      collabCompartment.of([]),
+      historyCompartment.of(historyExtension()),
+      lockCompartment.of([]),
+      basicSetupNoHistory,
       javascript(),
       tokyoNight,
       // Draws Strudel-style boxes around the tokens currently making sound.
       // Fed by updateMiniLocations() on eval and highlightHaps() every frame.
       highlightExtension,
+      // Draggable range inputs in front of every slider(...) value, fed by
+      // updateSliders() with the transpiler's widget locations on eval.
+      sliderExtension,
+      // Canvases for the inline visualizers (._punchcard(), ._scope(), …),
+      // placed after the call that asked for them by updateWidgets().
+      widgetExtension,
       // Mouse-hover documentation: pointing at a known function name pops its
       // docs + example usage, sourced from Strudel's JSDoc (strudel-docs.json).
       docHoverTooltip,
+      // Cmd-click (Ctrl-click off macOS) opens URLs and `github:` sample specs.
+      linkExtension,
     ],
   });
 
@@ -230,6 +339,72 @@ export function createEditor({
       effects: vimCompartment.reconfigure(on ? vimExtension() : []),
     });
     view.focus();
+  }
+
+  // --- networked play -------------------------------------------------------
+
+  // Turn a multiplayer session on or off in the live editor.
+  //
+  // Order matters. y-codemirror.next's sync plugin does *not* seed the editor
+  // from the Y.Text when it mounts — it only observes changes from then on — so
+  // the buffer has to be made to match the shared document *before* the
+  // extension goes in. Doing it the other way round would push the difference
+  // into the CRDT as a local edit, which for a joining guest means their buffer
+  // is concatenated onto the host's.
+  //
+  // Two dispatches, deliberately: the first happens while collab is still off,
+  // so the sync plugin never sees it.
+  function setCollab(extension, text) {
+    const on = !!extension && extension.length !== 0;
+    collabActive = on;
+    if (text != null && text !== view.state.doc.toString()) {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        selection: { anchor: Math.min(view.state.selection.main.anchor, text.length) },
+      });
+    }
+    view.dispatch({
+      effects: [
+        collabCompartment.reconfigure(on ? extension : []),
+        // Stock history and the CRDT must never both be live.
+        historyCompartment.reconfigure(on ? [] : historyExtension()),
+      ],
+    });
+    if (!on) setReadOnly(false);
+    view.focus();
+  }
+
+  // Idempotent on purpose. This is driven by session state changes, and those
+  // include awareness ticks that y-codemirror.next fires from *inside* a view
+  // update (it publishes the local cursor position there) — dispatching during
+  // an update throws. Since the lock only ever changes on a status transition,
+  // bailing when the value is unchanged removes the hazard entirely.
+  function setReadOnly(on) {
+    if (on === readOnly) return;
+    readOnly = on;
+    view.dispatch({ effects: lockCompartment.reconfigure(on ? lockExtension() : []) });
+  }
+
+  // A 2px accent in your own peer colour while a session is live, so there's
+  // never a beat of "wait, am I typing into someone else's file?". Drawn as an
+  // inset outline rather than a border so it costs no layout.
+  function setAccent(color) {
+    view.dom.classList.toggle('oat-session', !!color);
+    if (color) view.dom.style.setProperty('--oat-peer-color', color);
+    else view.dom.style.removeProperty('--oat-peer-color');
+  }
+
+  // Point vim's `u` / `Ctrl-r` at the session's Yjs UndoManager. Pass null to
+  // hand them back to CodeMirror's history.
+  function setSessionUndo(commands) {
+    handlers.sessionUndo = commands?.undo ?? null;
+    handlers.sessionRedo = commands?.redo ?? null;
+  }
+
+  function setSessionCommands({ onHostSession, onJoinSession, onLeaveSession }) {
+    handlers.onHostSession = onHostSession;
+    handlers.onJoinSession = onJoinSession;
+    handlers.onLeaveSession = onLeaveSession;
   }
 
   // Replace the current selection (or insert at the cursor) with `text`, then
@@ -246,7 +421,15 @@ export function createEditor({
 
   // Replace the whole buffer (used when opening / creating a song). Moves the
   // cursor to the top and refocuses.
+  //
+  // Refused during a multiplayer session: inside one this isn't "I opened a
+  // song," it's "I replaced everyone's work." The songs panel disables the
+  // commands that would call it (see songs.js), and this is the backstop.
   function setCode(code) {
+    if (collabActive) {
+      handlers.onStatus?.('in session — :leave to switch songs', 'error');
+      return;
+    }
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: code },
       selection: { anchor: 0 },
@@ -282,13 +465,26 @@ export function createEditor({
   }
   handlers.onFormat = formatBuffer;
 
+  // `:peruse` — index every sound the buffer's samples() calls import.
+  async function peruseBuffer() {
+    try {
+      await peruse(view, handlers.onStatus);
+    } catch (err) {
+      console.error(err);
+      handlers.onStatus?.('peruse failed: ' + (err?.message ?? err), 'error');
+      view.focus();
+    }
+  }
+  handlers.onPeruse = peruseBuffer;
+
   // Fill in the songs-panel command callbacks after the panel is constructed
   // (main.js builds the editor first, then the panel, then wires these).
-  function setSongCommands({ onOpenSongs, onRenameSong, onNewSong, onCopySong }) {
+  function setSongCommands({ onOpenSongs, onRenameSong, onNewSong, onCopySong, onWriteOut }) {
     handlers.onOpenSongs = onOpenSongs;
     handlers.onRenameSong = onRenameSong;
     handlers.onNewSong = onNewSong;
     handlers.onCopySong = onCopySong;
+    handlers.onWriteOut = onWriteOut;
   }
 
   return {
@@ -298,11 +494,21 @@ export function createEditor({
     setVimMode,
     insertAtCursor,
     setSongCommands,
+    setCollab,
+    setReadOnly,
+    setAccent,
+    setSessionUndo,
+    setSessionCommands,
     formatBuffer,
+    peruseBuffer,
     focus: () => view.focus(),
     // Replace the mini-notation locations to highlight (from the transpiler's
     // meta.miniLocations after each eval).
     updateMiniLocations: (locations) => updateMiniLocations(view, locations),
+    // Redraw the inline sliders (from the transpiler's meta.widgets).
+    updateSliders: (widgets) => updateSliders(view, widgets),
+    // Reposition the inline visualizer canvases (same meta.widgets list).
+    updateWidgets: (widgets) => updateWidgets(view, widgets),
     // Report the haps sounding at `time` so their tokens get boxed this frame.
     highlightHaps: (time, haps) => highlightMiniLocations(view, time, haps),
   };

@@ -235,6 +235,227 @@ button:hover {
   font-size: 0.85rem;
 }
 
+/* --- Multiplayer dropdown (src/net/) -------------------------------------- */
+
+#net {
+  position: relative;
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+#net-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+#net-toggle.on {
+  border-color: var(--net-self-color, var(--accent));
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+}
+
+/* Status dot, drawn in the peer's own colour. Pulses while connecting. */
+.net-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--net-self-color, var(--accent));
+}
+
+#net-toggle.connecting .net-dot {
+  animation: net-pulse 1s ease-in-out infinite;
+}
+
+@keyframes net-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+#net-dropdown {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 20;
+  width: 20rem;
+  padding: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+#net-dropdown[hidden] {
+  display: none;
+}
+
+.net-section {
+  margin: 0.75rem 0 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.net-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.net-row label {
+  width: 5.5rem;
+  flex: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.net-row input[type='text'],
+.net-row input[type='password'] {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+
+.net-row input[type='color'] {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.net-row code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.net-row button {
+  flex: none;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.net-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.net-actions button {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.net-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#net-peers {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.net-peer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.1rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.net-peer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.net-peer-tag {
+  margin-left: auto;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.net-peer-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+#net-note {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-family: system-ui, sans-serif;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+#net-note a {
+  color: var(--accent);
+}
+
+.net-local-note {
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #ff9e64;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  color: #ff9e64;
+}
+
+/* Remote cursors from y-codemirror.next. Its own baseTheme already handles the
+   caret geometry and the hover-to-reveal name label; these are the deltas —
+   its default label is white serif, which is both unreadable on the lighter
+   peer colours and out of place next to the monospace buffer. */
+.cm-ySelectionInfo {
+  font-family: system-ui, sans-serif !important;
+  font-size: 0.7em !important;
+  color: #1a1b26 !important;
+  padding: 0 0.3em !important;
+  border-radius: 3px 3px 3px 0;
+}
+
+/* Session accent: a 2px inset outline on the editor in your own peer colour,
+   so it's obvious at a glance that the buffer is shared. Inset so it costs no
+   layout (a real border would push the editor's 100%-height content). */
+.cm-editor.oat-session {
+  outline: 2px solid var(--oat-peer-color, var(--accent));
+  outline-offset: -2px;
+}
+
 /* Collapsible song panel. Width animates to 0 when closed. */
 #song-panel {
   width: 0;
@@ -299,6 +520,22 @@ button:hover {
   background: var(--border);
 }
 
+/* While a multiplayer session owns the buffer the list is a read-only view —
+   opening or creating a song would replace everyone's work (:leave first). */
+#song-list.locked .song-row {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#song-list.locked .song-row:hover {
+  background: none;
+}
+
+#song-new:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* The keyboard-highlighted row (j/k navigation). */
 .song-row.selected {
   background: var(--surface);
@@ -344,6 +581,87 @@ button:hover {
   max-width: 100%;
   object-fit: contain;
   border-radius: 6px;
+}
+
+/* Mini-notation cheatsheet (src/editor/cheatsheet.js), sharing the bottom dock
+   with the reference keyboard above — :mini shows, :nmini hides. Same [hidden]
+   on/off; the height is content-driven up to a ceiling, past which the sheet
+   scrolls rather than taking any more room from the editor. */
+#mini-ref {
+  flex: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.6rem 0.9rem 0.9rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+#mini-ref[hidden] {
+  display: none;
+}
+
+.mini-ref-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.mini-ref-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+}
+
+/* Multi-column rather than a grid: as many columns as the window is wide enough
+   for, and cards pack by height instead of every card in a row stretching to
+   match the tallest one — which is what keeps the whole sheet on screen. */
+.mini-ref-grid {
+  columns: 17rem;
+  column-gap: 0.6rem;
+}
+
+.mini-ref-card {
+  break-inside: avoid;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.7rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.mini-ref-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Two columns per row: the snippet, then what it does. */
+.mini-ref-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.mini-ref-card dt {
+  font-family: ui-monospace, monospace;
+  color: #9ece6a;
+  white-space: nowrap;
+}
+
+.mini-ref-card dd {
+  margin: 0;
+  color: var(--fg);
 }
 
 /* Mouse-hover documentation tooltip (src/editor/docs.js). Sits inside
@@ -449,6 +767,40 @@ button:hover {
   color: #9ece6a;
   white-space: pre-wrap;
   overflow-x: auto;
+}
+
+/* Inline value sliders (src/editor/slider.js). One sits in front of every
+   slider(...) number, so it has to read as part of the code line: short, flat,
+   and no taller than the text it shares a row with. */
+.oat-slider {
+  width: 64px;
+  height: 12px;
+  margin: 0 4px 0 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: ew-resize;
+}
+
+/* Inline visualizer canvases (src/editor/widget.js). Each sits at the end of
+   the ._punchcard() / ._scope() / … call that created it, so the container is
+   inline but the canvas inside is a block — otherwise the line box reserves
+   descender space under it and the picture floats. */
+.oat-widget-container {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.oat-widget-container canvas {
+  display: block;
+}
+
+/* The full-screen canvas the un-prefixed visualizers draw onto, created on
+   demand by @strudel/draw's getDrawContext(). It's position:fixed, which would
+   otherwise paint it over the whole app; a negative z-index puts it behind the
+   topbar and panels but still in front of the page background, so it shows
+   through the (transparent) code area and nowhere else. */
+#test-canvas {
+  z-index: -1;
 }
 
 .cm-editor {

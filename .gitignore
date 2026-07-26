@@ -5,5 +5,7 @@ dist/
 strudel-upstream/
 
 # On-disk song files written by the app (personal content). Un-ignore this if
-# you'd like to version/back-up your songs alongside the code.
-songs/
+# you'd like to version/back-up your songs alongside the code. Leading slash so
+# this only matches the repo-root directory — unanchored, it also swallowed
+# src/songs/, which is source.
+/songs/

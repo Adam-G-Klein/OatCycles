@@ -38,6 +38,66 @@
           <span>BPM</span>
         </label>
       </div>
+      <div id="net" title="Multiplayer — shared editing, peer to peer (:host / :join / :leave)">
+        <button id="net-toggle" aria-expanded="false" aria-haspopup="dialog">👥 Multiplayer</button>
+        <div id="net-dropdown" role="dialog" aria-label="Multiplayer" hidden>
+          <div class="net-row">
+            <label for="net-name">Your name</label>
+            <input type="text" id="net-name" maxlength="24" autocomplete="off" />
+            <input type="color" id="net-color" title="Your cursor colour" />
+          </div>
+
+          <div id="net-idle">
+            <div class="net-section">Host</div>
+            <div class="net-row">
+              <label>Room</label>
+              <code id="net-host-room"></code>
+              <button id="net-host-copy" title="Copy “room · passphrase”">copy</button>
+            </div>
+            <div class="net-row">
+              <label for="net-host-pass">Passphrase</label>
+              <input type="password" id="net-host-pass" readonly />
+              <button id="net-host-reroll" title="Generate a new room and passphrase">↻</button>
+            </div>
+            <div class="net-actions"><button id="net-host">Host session</button></div>
+
+            <div class="net-section">Join</div>
+            <div class="net-row">
+              <label for="net-join-room">Room</label>
+              <input
+                type="text"
+                id="net-join-room"
+                placeholder="warm-tidal-fox — or paste both"
+                autocomplete="off"
+              />
+            </div>
+            <div class="net-row">
+              <label for="net-join-pass">Passphrase</label>
+              <input type="password" id="net-join-pass" autocomplete="off" />
+            </div>
+            <div class="net-actions"><button id="net-join">Join session</button></div>
+          </div>
+
+          <div id="net-connected" hidden>
+            <div class="net-section">Session</div>
+            <div class="net-row">
+              <label>Room</label>
+              <code id="net-room"></code>
+              <button id="net-copy" title="Copy “room · passphrase”">copy</button>
+            </div>
+            <ul id="net-peers"></ul>
+            <div class="net-actions"><button id="net-leave">Leave session</button></div>
+          </div>
+
+          <div id="net-note">
+            Everyone in the room can type code that you evaluate on your own machine. Share the
+            passphrase only with people you'd hand your laptop to. Nobody can trigger your audio.
+            <a href="https://github.com/Adam-G-Klein/OatCycles" target="_blank" rel="noopener"
+              >Source (AGPL-3.0)</a
+            >
+          </div>
+        </div>
+      </div>
       <button id="songs-toggle" title="Saved songs (:o)">☰ Songs</button>
       <span id="status">booting…</span>
     </header>
@@ -55,6 +115,12 @@
     <div id="keyboard-ref" title="Keyboard reference (:kyb / :nkyb)" hidden>
       <img src="/keyboardImg.jpg" alt="Keyboard reference" />
     </div>
+    <div
+      id="mini-ref"
+      title="Mini-notation cheatsheet (:mini / :nmini)"
+      aria-label="Mini-notation cheatsheet"
+      hidden
+    ></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

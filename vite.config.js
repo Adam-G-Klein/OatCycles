@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { songsPlugin } from './vite-songs-plugin.js';
+import { writeoutPlugin } from './vite-writeout-plugin.js';
 
 // The vendored strudel-upstream clone is only needed for later core patches
 // (M4 superdough sustain). Keep Vite from crawling its example apps.
@@ -7,7 +8,9 @@ export default defineConfig({
   // Persist songs as real text files under ./songs (dev + preview). Without
   // this the song panel is localStorage-only and vanishes when the browser is
   // cleared. See vite-songs-plugin.js.
-  plugins: [songsPlugin({ dir: 'songs' })],
+  // `:writeout <path>` copies the current buffer to any path on disk (backups
+  // outside the app's own store). See vite-writeout-plugin.js.
+  plugins: [songsPlugin({ dir: 'songs' }), writeoutPlugin()],
   server: {
     // Honor an injected PORT (e.g. preview harness) but default to 5173 for
     // the normal `oat` dev workflow.

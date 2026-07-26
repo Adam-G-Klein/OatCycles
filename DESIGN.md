@@ -146,12 +146,41 @@ o-prefixed commands are only `omap`/`onoremap`/`omapclear`; there is no stock `o
 | `:o` | ex | Open the songs side panel | `editor/editor.js` → `songs/songs.js` |
 | `:name <filename>` | ex | Rename the current song | `editor/editor.js` → `songs/songs.js` |
 | `:new [name]` | ex | Start a fresh (blank) song; auto-names if omitted | `editor/editor.js` → `songs/songs.js` |
+| `:writeout [path]` | ex | Copy the buffer to any path on disk (backup); bare repeats the last path for this song | `editor/editor.js` → `songs/writeout.js` |
+| `:mini` / `:nmini` | ex | Show / hide the mini-notation cheatsheet in the bottom dock (shares that space with `:kyb`) | `editor/editor.js` → `editor/cheatsheet.js` |
+| `:peruse` | ex | Append (or refresh in place) a browsable index of every sound the buffer's `samples()` calls import | `editor/editor.js` → `editor/peruse.js` |
 | `gc` | normal + visual | Toggle line comment | `editor/editor.js` |
 | `kj` | insert | Escape to normal mode | `editor/editor.js` |
 
 Inside the songs panel (a plain DOM element, not CodeMirror — its keys are handled by a
 local keydown listener, not the vim extension): `j`/`k` move, `gg`/`G` jump to ends,
 `Enter` opens the highlighted song, `dd` deletes it (with confirm), `Esc` closes.
+
+**Mouse.** Hovering a known function name pops its docs (`editor/docs.js`). Cmd-click
+(Ctrl-click off macOS) opens the address under the pointer in a new tab — http(s) URLs
+anywhere in the buffer, plus Strudel's `github:owner/repo` sample shorthand, which
+resolves to the repository page (`editor/links.js`). Links carry a dotted underline that
+goes solid while the modifier is held.
+
+### 5.1a Sound perusal (`:peruse`)
+A sample bank is opaque until you've heard it: `samples('github:…')` registers a few
+hundred names the buffer never lists. `:peruse` reads the buffer's `samples()` calls off
+the **syntax tree** (so commented-out calls don't count), fetches each bank's JSON using
+the same URL resolution Strudel's own `samples()` does, and appends a marked block —
+one `const` array of every sound name per bank, an index to scrub, and a live
+`pickmod`-driven line:
+
+```js
+const dirtSamples = ["808", "bd", "sd", /* … */];
+const dirtSamplesI = 0;  // which sound
+const dirtSamplesN = 0;  // which variant of it (wraps)
+peruse_dirtSamples: s(pickmod(dirtSamples, dirtSamplesI)).n(dirtSamplesN)
+```
+
+So auditioning is "change a number, `:w`". Pitch-mapped banks (piano, vcsl) get a `note`
+knob instead of `n`, since `n` doesn't select there. Re-running replaces the block
+between its `// >>> peruse` / `// <<< peruse` markers, carrying the index values and
+which bank's line is uncommented across — only one plays at a time.
 
 ### 5.1b Song file system (disk-backed persistence)
 Answers open question §8.2. A collapsible right-side panel lists saved songs, persisted
