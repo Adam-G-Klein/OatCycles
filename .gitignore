@@ -4,6 +4,11 @@ dist/
 *.log
 strudel-upstream/
 
+# Capacitor native project — generated on your Mac with `npm run ios:add`.
+# It contains CocoaPods output and machine/signing-specific bits, so it's
+# rebuilt from capacitor.config.json + dist/ rather than versioned. See IOS.md.
+ios/
+
 # On-disk song files written by the app (personal content). Un-ignore this if
 # you'd like to version/back-up your songs alongside the code. Leading slash so
 # this only matches the repo-root directory — unanchored, it also swallowed
