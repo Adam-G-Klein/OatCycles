@@ -811,3 +811,95 @@ button:hover {
 .cm-editor.cm-focused {
   outline: none;
 }
+
+/* --- Collapsible topbar menu (hamburger on mobile) ----------------------- */
+
+/* On wide screens the wrapper is transparent to layout: its children (Vim,
+   MIDI, voice, Multiplayer, Songs) sit directly in the topbar flex row exactly
+   as before, and the hamburger is hidden. `display: contents` is what keeps the
+   desktop layout byte-for-byte unchanged. */
+#menu-items {
+  display: contents;
+}
+
+#menu-toggle {
+  display: none;
+  align-items: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+}
+
+/* Phones (portrait). Fold the secondary controls behind the hamburger; keep
+   only Play/Stop, the song name, status, and the menu button on the bar. */
+@media (max-width: 640px) {
+  #topbar {
+    position: relative; /* positioning context for the dropdown */
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+  }
+
+  /* Reclaim horizontal room for Play/Stop + the hamburger. */
+  #topbar h1 {
+    display: none;
+  }
+
+  #song-name {
+    max-width: 7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #status {
+    margin-left: auto;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #menu-toggle {
+    display: inline-flex;
+    order: 99; /* always the rightmost item on the bar */
+  }
+
+  /* The wrapper turns into a dropdown panel anchored under the topbar, revealed
+     by toggling `.open` (see the hamburger handler in main.js). */
+  #menu-items {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0.5rem;
+    z-index: 30;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+    width: min(18rem, calc(100vw - 1rem));
+    max-height: calc(100dvh - 3.5rem);
+    overflow-y: auto;
+    margin-top: 0.4rem;
+    padding: 0.75rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+
+  #menu-items.open {
+    display: flex;
+  }
+
+  /* Each control spans the menu width; the Multiplayer dropdown flows inline
+     rather than floating off its (now full-width) anchor. */
+  #menu-items > * {
+    width: 100%;
+  }
+
+  #net-dropdown {
+    position: static;
+    width: 100%;
+    margin-top: 0.4rem;
+    box-shadow: none;
+  }
+}

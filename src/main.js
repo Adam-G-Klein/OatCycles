@@ -213,6 +213,42 @@ vimCheckbox.addEventListener('change', () => {
   editor.setVimMode(on);
 });
 
+// Mobile menu: on narrow screens the topbar's secondary controls (Vim, MIDI,
+// voice, Multiplayer, Songs) collapse behind a hamburger, and #menu-items is
+// styled as a dropdown (see the max-width rules in style.css). On desktop the
+// wrapper is display:contents and the toggle is hidden, so the `.open` class is
+// inert there — this wiring is harmless when the hamburger isn't shown.
+const menuToggle = document.getElementById('menu-toggle');
+const menuItems = document.getElementById('menu-items');
+
+function setMenuOpen(open) {
+  menuItems.classList.toggle('open', open);
+  menuToggle.setAttribute('aria-expanded', String(open));
+}
+
+menuToggle.addEventListener('click', (e) => {
+  e.stopPropagation(); // don't let the document handler below close it immediately
+  setMenuOpen(!menuItems.classList.contains('open'));
+});
+
+// A tap anywhere outside the open menu (and outside the hamburger) closes it.
+document.addEventListener('click', (e) => {
+  if (!menuItems.classList.contains('open')) return;
+  if (menuItems.contains(e.target) || menuToggle.contains(e.target)) return;
+  setMenuOpen(false);
+});
+
+// Escape closes the menu (only acts while it's open; otherwise it's a no-op and
+// the editor/song-panel keep their own Escape handling).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && menuItems.classList.contains('open')) setMenuOpen(false);
+});
+
+// Opening the Songs panel slides it in over the editor, so collapse the menu to
+// get it out of the way. (The panel toggle itself is wired up in the songs
+// setup below; this listener just closes the menu alongside it.)
+document.getElementById('songs-toggle').addEventListener('click', () => setMenuOpen(false));
+
 // MIDI panel (M2): device picker + midikeys snippet insertion + activity
 // indicator. Opt-in — nothing touches Web MIDI until the user clicks Enable.
 setupMidiPanel({

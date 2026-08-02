@@ -13,6 +13,16 @@
         <button id="play" title="Cmd+Enter">▶ Play</button>
         <button id="stop" title="Cmd+.">■ Stop</button>
       </div>
+      <button
+        id="menu-toggle"
+        aria-expanded="false"
+        aria-controls="menu-items"
+        aria-label="Menu"
+        title="Menu"
+      >
+        ☰
+      </button>
+      <div id="menu-items">
       <label id="vim-toggle" title="Vim keybindings — :w plays, :q stops, gc comments">
         <input type="checkbox" id="vim-mode" />
         <span>Vim</span>
@@ -99,6 +109,7 @@
         </div>
       </div>
       <button id="songs-toggle" title="Saved songs (:o)">☰ Songs</button>
+      </div>
       <span id="status">booting…</span>
     </header>
     <div id="workspace">

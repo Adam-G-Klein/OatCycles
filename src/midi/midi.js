@@ -46,6 +46,17 @@ kb().s("sawtooth").cutoff(1500).lpq(6).gain(0.7)`;
 }
 
 export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle, activity, onInsertSnippet, onInsertNote, onStatus }) {
+  // Web MIDI doesn't exist in WebKit/iOS (Safari, and every iOS browser, which
+  // are all WebKit) or in any non-secure context. Rather than offer an "Enable
+  // MIDI" button that can only fail, hide the whole control when the API is
+  // absent. Inline display:none because `#midi { display: flex }` would
+  // otherwise win over the [hidden] attribute.
+  if (typeof navigator === 'undefined' || typeof navigator.requestMIDIAccess !== 'function') {
+    const root = enableBtn.closest('#midi');
+    if (root) root.style.display = 'none';
+    return;
+  }
+
   let WebMidi = null;
   let activeDevice = null;
   let activityListener = null;

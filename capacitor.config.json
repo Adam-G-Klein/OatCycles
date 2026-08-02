@@ -1,0 +1,12 @@
+{
+  "appId": "cc.oatcycles.app",
+  "appName": "OatCycles",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#1a1b26"
+  },
+  "server": {
+    "iosScheme": "oatcycles"
+  }
+}
