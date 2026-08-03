@@ -6,12 +6,25 @@
     <title>OatCycles</title>
   </head>
   <body>
+    <!-- Shown only under ?agent=1 (see src/main.js). Makes it impossible to
+         mistake an agent's session for your own: nothing here can make sound
+         or write to SavedSongs/ or AutoSaves/. -->
+    <div id="agent-banner" hidden>
+      🤖 <strong>Agent mode</strong> — master output muted, songs are never written to disk.
+      Reload without <code>?agent=1</code> to compose.
+    </div>
     <header id="topbar">
       <h1>OatCycles</h1>
       <span id="song-name" title="Double-click to rename (or :name &lt;filename&gt;)">untitled</span>
       <div class="controls">
         <button id="play" title="Cmd+Enter">▶ Play</button>
-        <button id="stop" title="Cmd+.">■ Stop</button>
+        <button
+          id="play-silent"
+          title="Play with the master output muted — everything runs, nothing is audible. Agents: window.oat.silentPlay()"
+        >
+          🔇 Play
+        </button>
+        <button id="stop" title="Cmd+. — press again to cut sounds still ringing">■ Stop</button>
       </div>
       <label id="vim-toggle" title="Vim keybindings — :w plays, :q stops, gc comments">
         <input type="checkbox" id="vim-mode" />
@@ -105,10 +118,16 @@
       <main id="editor"></main>
       <aside id="song-panel" tabindex="-1" aria-label="Saved songs">
         <div id="song-panel-header">
-          <span>Songs</span>
+          <span id="song-panel-title">Songs</span>
           <button id="song-new" title="New song (:new)">＋</button>
         </div>
         <ul id="song-list"></ul>
+        <!-- Ex-style command line for the panel itself: ":" opens it, ":q" goes
+             back up a level (or closes the panel at the top). -->
+        <div id="song-cmdline" hidden>
+          <span>:</span>
+          <input type="text" spellcheck="false" autocomplete="off" aria-label="Panel command" />
+        </div>
         <div id="song-panel-hint">j/k move · gg/G ends · ⏎ open · dd delete · esc close</div>
       </aside>
     </div>
@@ -119,6 +138,12 @@
       id="mini-ref"
       title="Mini-notation cheatsheet (:mini / :nmini)"
       aria-label="Mini-notation cheatsheet"
+      hidden
+    ></div>
+    <div
+      id="banks-ref"
+      title="Local sample banks (:banks / :nbanks)"
+      aria-label="Local sample banks"
       hidden
     ></div>
     <script type="module" src="/src/main.js"></script>

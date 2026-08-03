@@ -3,28 +3,68 @@
 // A collapsible right-side panel that lists saved songs, backed by real text
 // files on disk (via the /api/songs dev-server endpoint) with a localStorage
 // mirror for instant boot and offline fallback. The panel is a plain DOM
-// element (not CodeMirror), so its vim-style navigation (j/k/gg/G/Enter/dd) is
-// handled by a local keydown listener that is only active while the panel has
-// focus.
+// element (not CodeMirror), so its vim-style navigation (j/k/gg/G/Enter/dd/:q)
+// is handled by a local keydown listener that is only active while the panel
+// has focus.
+//
+// Saving is split in two, and the split is the point:
+//
+//   :save            writes SavedSongs/<name>.js. The only thing that does.
+//   every play       appends AutoSaves/<name>_auto_<date>_<time>.js, which can
+//                    never overwrite a saved song or an earlier snapshot.
+//
+// So playing a pattern can no longer damage a file the user meant to keep. The
+// snapshots are reachable from the panel: the AutoSaves/ row at the foot of the
+// list descends into them (⏎), and :q comes back up.
 //
 // Data model:
-//   disk   → ./songs/<name>.js text files + ./songs/index.json manifest
+//   disk   → ./SavedSongs/<name>.js + index.json, ./AutoSaves/<name>_auto_*.js
 //   mirror → localStorage oat.songs (JSON array) + oat.currentSongId
 //
-// The editor buffer is auto-saved into the current song on every play (see
-// main.js), and again just before switching/creating songs so nothing typed
-// since the last play is ever lost. Each save writes localStorage immediately
-// and flushes to disk (debounced). See storage.js.
+// Each song record holds `code` (the live buffer, mirrored to localStorage) and
+// `diskCode` (what its file actually contains). See storage.js.
 
-import { loadSongs, createSaver, getCurrentId, setCurrentId } from './storage.js';
+import {
+  loadSongs,
+  createSaver,
+  getCurrentId,
+  setCurrentId,
+  postAutosave,
+  fetchAutosaves,
+  fetchAutosave,
+} from './storage.js';
+
+const AUTOSAVES_ROW = 'AutoSaves/';
 
 function uid() {
   return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// Pick an unused "untitled" / "untitled N" name so blank :new / + always works.
-function uniqueUntitled(songs) {
-  const base = 'untitled';
+// Snapshot filenames carry a sanitized song name (the server has no manifest to
+// look the original up in), so matching a snapshot back to its song means
+// sanitizing the same way. Mirrors safeBase() in vite-songs-plugin.js.
+function sanitize(name) {
+  const base = String(name || '')
+    .trim()
+    .replace(/[^\w.\- ]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return base || 'untitled';
+}
+
+// Compact enough for a 15rem panel: "Jul 26 09:41".
+function shortWhen(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  const mon = d.toLocaleString(undefined, { month: 'short' });
+  return `${mon} ${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Pick an unused "<base>" / "<base> N" name. Distinct from nextCopyName below:
+// this is a fresh file that happens to want a name already on the shelf, not a
+// numbered lineage, so "peruse casio" becomes "peruse casio 2" rather than
+// "peruse casio1".
+function uniqueName(base, songs) {
   const taken = new Set(songs.map((s) => s.name));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
@@ -32,6 +72,9 @@ function uniqueUntitled(songs) {
     if (!taken.has(candidate)) return candidate;
   }
 }
+
+// Pick an unused "untitled" / "untitled N" name so blank :new / + always works.
+const uniqueUntitled = (songs) => uniqueName('untitled', songs);
 
 // Derive the next filename for :copy — increment a trailing number, or append
 // "1" when the name has none (song → song1, verse2 → verse3). Keeps bumping the
@@ -53,6 +96,9 @@ export async function setupSongsPanel({
   panel, // <aside> container
   listEl, // <ul> the rows render into
   newBtn, // "+" button in the panel header
+  titleEl, // panel header label — tracks which view you're in
+  cmdEl, // the panel's own ":" command line (wrapper holding an <input>)
+  hintEl, // footer key hints — differ per view
   filenameEl, // topbar element showing the current song name (dbl-click to rename)
   getCode, // () => current editor buffer text
   setCode, // (text) => replace editor buffer
@@ -74,17 +120,26 @@ export async function setupSongsPanel({
   let isOpen = false;
   let pending = null; // first key of a two-key sequence (gg / dd)
   let pendingTimer = null;
+  let view = 'songs'; // 'songs' (top level) | 'autosaves' (inside the folder)
+  let songsSelected = 0; // where to land back on when :q leaves the folder
+  let autosaves = []; // [{ file, name, savedAt }], newest first
+
+  const cmdInput = cmdEl?.querySelector('input') ?? null;
 
   // One saver per session: writes localStorage synchronously and flushes to
   // disk (debounced). `persistSongs` is the single funnel for every mutation.
+  // Only songs the user has saved reach the files — see storage.js diskPayload.
   const saver = createSaver({ onDisk });
-  const persistSongs = (list) => saver.save(list);
+  // A guest, or an agent-driven page, keeps its localStorage mirror but writes
+  // no files: the buffer on screen isn't theirs to commit to anyone's disk.
+  const persistSongs = (list) => saver.save(list, { skipDisk: suppressSave() });
 
   // --- bootstrap: guarantee there is always a valid current song ----------
   if (songs.length === 0) {
     // First run ever: seed one song from whatever the editor already holds
-    // (the default pattern) so the current buffer becomes a real file.
-    const song = { id: uid(), name: 'untitled', code: getCode(), updatedAt: Date.now() };
+    // (the default pattern). It is not written to SavedSongs/ — nothing is,
+    // until the user asks for it — but it is autosaved like any other song.
+    const song = { id: uid(), name: 'untitled', code: getCode(), saved: false, savedAt: 0 };
     songs.push(song);
     currentId = song.id;
     persistSongs(songs);
@@ -125,7 +180,7 @@ export async function setupSongsPanel({
       return;
     }
     const c = current();
-    filenameEl.textContent = c ? c.name : 'untitled';
+    filenameEl.textContent = c ? (c.saved ? c.name : `${c.name} [+]`) : 'untitled';
   }
 
   function setNameOverride(name) {
@@ -133,45 +188,102 @@ export async function setupSongsPanel({
     renderFilename();
   }
 
-  function renderList() {
+  // --- rendering -----------------------------------------------------------
+
+  function row(className) {
+    const li = document.createElement('li');
+    li.className = `song-row ${className}`.trim();
+    return li;
+  }
+
+  function label(li, text, className = 'song-name') {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    li.appendChild(span);
+    return span;
+  }
+
+  function renderSongRows() {
     // While a session owns the buffer, the list is a read-only view: opening or
     // creating a song here would replace everyone's work.
     const locked = !!sessionLock();
     listEl.classList.toggle('locked', locked);
     if (newBtn) newBtn.disabled = locked;
-    listEl.innerHTML = '';
+
     songs.forEach((song, i) => {
-      const li = document.createElement('li');
-      li.className = 'song-row';
-      if (song.id === currentId) li.classList.add('current');
+      const li = row(song.id === currentId ? 'current' : '');
       if (i === selected) li.classList.add('selected');
       li.dataset.id = song.id;
+      label(li, song.name);
 
-      const name = document.createElement('span');
-      name.className = 'song-name';
-      name.textContent = song.name;
-      li.appendChild(name);
-
+      // A song with no file yet: it exists in localStorage and in its
+      // autosaves, and :save is what turns it into SavedSongs/<name>.js.
+      if (!song.saved) label(li, '[+]', 'song-unsaved');
       if (song.id === currentId) {
-        const dot = document.createElement('span');
-        dot.className = 'song-current-dot';
-        dot.textContent = '●';
+        const dot = label(li, '●', 'song-current-dot');
         dot.title = 'current file';
-        li.appendChild(dot);
       }
 
       li.addEventListener('click', () => openSong(song.id));
       listEl.appendChild(li);
     });
+
+    const folder = row('folder');
+    if (selected === songs.length) folder.classList.add('selected');
+    label(folder, AUTOSAVES_ROW);
+    folder.addEventListener('click', () => enterAutosaves());
+    listEl.appendChild(folder);
+  }
+
+  function renderAutosaveRows() {
+    listEl.classList.remove('locked');
+    if (newBtn) newBtn.disabled = true;
+
+    if (autosaves.length === 0) {
+      const li = row('folder');
+      label(li, 'no snapshots yet');
+      listEl.appendChild(li);
+      return;
+    }
+    autosaves.forEach((entry, i) => {
+      const li = row('');
+      if (i === selected) li.classList.add('selected');
+      label(li, entry.name);
+      label(li, shortWhen(entry.savedAt), 'song-when');
+      li.addEventListener('click', () => openAutosave(entry));
+      listEl.appendChild(li);
+    });
+  }
+
+  function renderList() {
+    listEl.innerHTML = '';
+    if (view === 'autosaves') renderAutosaveRows();
+    else renderSongRows();
+
+    if (titleEl) titleEl.textContent = view === 'autosaves' ? 'AutoSaves' : 'Songs';
+    if (hintEl) {
+      hintEl.textContent =
+        view === 'autosaves'
+          ? 'j/k move · gg/G ends · ⏎ restore · :q back'
+          : 'j/k move · gg/G ends · ⏎ open · dd delete · :q close';
+    }
     // Keep the highlighted row in view during keyboard navigation.
     const sel = listEl.querySelector('.song-row.selected');
     if (sel) sel.scrollIntoView({ block: 'nearest' });
   }
 
+  // How many rows the current view can land on (the songs view has the
+  // AutoSaves/ folder row after the last song).
+  function rowCount() {
+    return view === 'autosaves' ? autosaves.length : songs.length + 1;
+  }
+
   // --- persistence actions -------------------------------------------------
 
-  // Flush the editor buffer into the current song. Called on every play and
-  // before any switch/create so unsaved edits survive.
+  // Snapshot the editor buffer. Called on every play and before any
+  // switch/create so unsaved edits survive — but it writes to AutoSaves/ only.
+  // The song's own file is never touched here; that is what :save is for.
   function autoSaveCurrent() {
     // A guest in a session writes nothing to disk: the buffer on screen is the
     // host's song, and two machines each saving their own copy of a file they
@@ -179,9 +291,83 @@ export async function setupSongsPanel({
     if (suppressSave()) return;
     const c = current();
     if (!c) return;
-    c.code = getCode();
-    c.updatedAt = Date.now();
+    const code = getCode();
+    c.code = code;
+    persistSongs(songs); // refresh the mirror; saved files stay as they are
+    if (!onDisk) return;
+    // Fire and forget: a snapshot is a background courtesy, and the play it
+    // rides along with shouldn't wait on the network for it.
+    postAutosave({ name: c.name, code }).catch((err) => {
+      console.warn('autosave failed:', err);
+    });
+  }
+
+  // :save [name] — the only path that writes SavedSongs/.
+  //
+  //   :save            write the buffer to the current song's file, creating it
+  //                    if this song has never been saved
+  //   :save <current>  same thing
+  //   :save <other>    copy the buffer to a new file under that name and make
+  //                    it current; the song being left keeps its own file
+  //                    exactly as it was
+  //
+  // A name already belonging to another saved song is refused rather than
+  // overwritten — clobbering a file is what this whole split exists to prevent.
+  function saveCurrent(rawName) {
+    if (suppressSave()) {
+      onStatus?.('not saving in this session', 'error');
+      return;
+    }
+    const c = current();
+    if (!c) return;
+    const code = getCode();
+    const name = (rawName || '').trim();
+
+    if (!name || name === c.name) {
+      c.code = code;
+      c.diskCode = code;
+      c.saved = true;
+      c.savedAt = Date.now();
+      persistSongs(songs);
+      renderFilename();
+      if (isOpen) renderList();
+      onStatus?.(`saved “${c.name}”`);
+      return;
+    }
+
+    if (songs.some((s) => s.id !== c.id && s.name === name)) {
+      onStatus?.(`“${name}” already exists — pick another name`, 'error');
+      return;
+    }
+
+    // A song with no file behind it isn't being copied anywhere: naming it is
+    // just naming it. Only a song that already has a file forks into a second.
+    if (!c.saved) {
+      c.name = name;
+      c.code = code;
+      c.diskCode = code;
+      c.saved = true;
+      c.savedAt = Date.now();
+      persistSongs(songs);
+      renderFilename();
+      if (isOpen) renderList();
+      onStatus?.(`saved “${name}”`);
+      return;
+    }
+
+    // The edits move to the new file, so the song we're leaving goes back to
+    // matching its own — it keeps whatever it last saved, untouched. Nothing is
+    // lost either way: the buffer as it stood is in AutoSaves/ under both names.
+    c.code = c.diskCode ?? c.code;
+    const song = { id: uid(), name, code, diskCode: code, saved: true, savedAt: Date.now() };
+    songs.push(song);
+    currentId = song.id;
     persistSongs(songs);
+    setCurrentId(currentId);
+    selected = songs.length - 1;
+    renderFilename();
+    if (isOpen) renderList();
+    onStatus?.(`saved “${name}”`);
   }
 
   function openSong(id) {
@@ -190,7 +376,7 @@ export async function setupSongsPanel({
       return;
     }
     if (blocked()) return;
-    autoSaveCurrent(); // "auto-save current, then switch"
+    autoSaveCurrent(); // "snapshot the current buffer, then switch"
     const song = songs.find((s) => s.id === id);
     if (!song) return;
     currentId = id;
@@ -201,34 +387,19 @@ export async function setupSongsPanel({
     close();
   }
 
-  function newSong(rawName) {
-    if (blocked()) return;
+  // :new [name] — a fresh song, blank unless the caller seeds it (`:banks`
+  // opens one already holding the samples() call for the bank you picked).
+  //
+  // Returns the song, or null when a session refused the switch, so a caller
+  // that wants to do something to the new buffer knows there is one.
+  function newSong(rawName, { code = '' } = {}) {
+    if (blocked()) return null;
     autoSaveCurrent();
-    const name = (rawName || '').trim() || uniqueUntitled(songs);
-    const song = { id: uid(), name, code: '', updatedAt: Date.now() };
-    songs.push(song);
-    currentId = song.id;
-    persistSongs(songs);
-    setCurrentId(currentId);
-    setCode('');
-    selected = songs.length - 1;
-    renderFilename();
-    if (isOpen) renderList();
-    onStatus?.(`new song “${name}”`);
-    focusEditor();
-  }
-
-  // :copy — duplicate the current song into a new numbered file. Saves the
-  // current buffer first (so the copy captures everything typed since the last
-  // play), then creates a sibling with an incremented name and switches to it.
-  function copyCurrent() {
-    if (blocked()) return;
-    autoSaveCurrent();
-    const c = current();
-    if (!c) return;
-    const code = getCode();
-    const name = nextCopyName(c.name, songs);
-    const song = { id: uid(), name, code, updatedAt: Date.now() };
+    const asked = (rawName || '').trim();
+    // A duplicate name would make two rows that read identically and two files
+    // that differ only by the disambiguating suffix the songs plugin adds.
+    const name = asked ? uniqueName(asked, songs) : uniqueUntitled(songs);
+    const song = { id: uid(), name, code, saved: false, savedAt: 0 };
     songs.push(song);
     currentId = song.id;
     persistSongs(songs);
@@ -237,7 +408,32 @@ export async function setupSongsPanel({
     selected = songs.length - 1;
     renderFilename();
     if (isOpen) renderList();
-    onStatus?.(`copied to “${name}”`);
+    onStatus?.(`new song “${name}”`);
+    focusEditor();
+    return song;
+  }
+
+  // :copy — duplicate the current song into a new numbered song. Snapshots the
+  // current buffer first (so the copy captures everything typed since the last
+  // play), then creates a sibling with an incremented name and switches to it.
+  // The copy has no file of its own until it is saved.
+  function copyCurrent() {
+    if (blocked()) return;
+    autoSaveCurrent();
+    const c = current();
+    if (!c) return;
+    const code = getCode();
+    const name = nextCopyName(c.name, songs);
+    const song = { id: uid(), name, code, saved: false, savedAt: 0 };
+    songs.push(song);
+    currentId = song.id;
+    persistSongs(songs);
+    setCurrentId(currentId);
+    setCode(code);
+    selected = songs.length - 1;
+    renderFilename();
+    if (isOpen) renderList();
+    onStatus?.(`copied to “${name}” — :save to write it`);
     focusEditor();
   }
 
@@ -260,7 +456,7 @@ export async function setupSongsPanel({
     const c = current();
     if (!c) return;
     c.name = name;
-    c.updatedAt = Date.now();
+    if (c.saved) c.savedAt = Date.now(); // the file itself is being renamed
     persistSongs(songs);
     renderFilename();
     if (isOpen) renderList();
@@ -278,19 +474,20 @@ export async function setupSongsPanel({
     const c = current();
     if (!c) return;
     c.name = name;
-    c.updatedAt = Date.now();
+    if (c.saved) c.savedAt = Date.now();
     persistSongs(songs);
     renderFilename();
     if (isOpen) renderList();
   }
 
-  // Save a buffer as a brand-new local song and switch to it. Used when a guest
-  // leaves a session, so the shared work they were part of isn't just lost.
+  // Keep a buffer as a brand-new local song and switch to it. Used when a guest
+  // leaves a session, so the shared work they were part of isn't just lost. It
+  // arrives unsaved, like any new song, but is snapshotted immediately.
   function importSong(rawName, code) {
     const base = (rawName || '').trim() || uniqueUntitled(songs);
     const taken = new Set(songs.map((s) => s.name));
     const name = taken.has(base) ? nextCopyName(base, songs) : base;
-    const song = { id: uid(), name, code, updatedAt: Date.now() };
+    const song = { id: uid(), name, code, saved: false, savedAt: 0 };
     songs.push(song);
     currentId = song.id;
     persistSongs(songs);
@@ -299,7 +496,10 @@ export async function setupSongsPanel({
     setNameOverride(null);
     renderFilename();
     if (isOpen) renderList();
-    onStatus?.(`saved as “${name}”`);
+    if (onDisk && !suppressSave()) {
+      postAutosave({ name, code }).catch((err) => console.warn('autosave failed:', err));
+    }
+    onStatus?.(`kept as “${name}” — :save to write it`);
     return song;
   }
 
@@ -311,12 +511,15 @@ export async function setupSongsPanel({
     const idx = songs.findIndex((s) => s.id === id);
     if (idx === -1) return;
     const song = songs[idx];
-    if (!window.confirm(`Delete “${song.name}”? This cannot be undone.`)) return;
+    const warning = song.saved
+      ? `Delete “${song.name}”? Its file goes too. Snapshots in AutoSaves/ are kept.`
+      : `Delete “${song.name}”? It was never saved; only its snapshots in AutoSaves/ remain.`;
+    if (!window.confirm(warning)) return;
 
     songs.splice(idx, 1);
     if (songs.length === 0) {
       // Never leave the app without a current song; recreate a blank one.
-      const fresh = { id: uid(), name: 'untitled', code: '', updatedAt: Date.now() };
+      const fresh = { id: uid(), name: 'untitled', code: '', saved: false, savedAt: 0 };
       songs.push(fresh);
       currentId = fresh.id;
       setCode('');
@@ -328,10 +531,70 @@ export async function setupSongsPanel({
     }
     persistSongs(songs);
     setCurrentId(currentId);
-    selected = Math.min(selected, songs.length - 1);
+    selected = Math.min(selected, songs.length);
     renderFilename();
     renderList();
     onStatus?.(`deleted “${song.name}”`);
+  }
+
+  // --- the AutoSaves/ folder -----------------------------------------------
+
+  async function enterAutosaves() {
+    if (!onDisk) {
+      onStatus?.('no autosaves without the dev server', 'error');
+      return;
+    }
+    try {
+      autosaves = await fetchAutosaves();
+    } catch (err) {
+      console.error(err);
+      onStatus?.('could not read AutoSaves/', 'error');
+      return;
+    }
+    songsSelected = selected;
+    view = 'autosaves';
+    selected = 0;
+    renderList();
+  }
+
+  function leaveAutosaves() {
+    view = 'songs';
+    selected = Math.min(songsSelected, songs.length);
+    renderList();
+  }
+
+  // Restore a snapshot into the editor. It lands as an ordinary unsaved buffer:
+  // if the song it came from still exists, that song becomes current so a
+  // following bare :save puts the snapshot back into its own file. Nothing
+  // under SavedSongs/ changes until then.
+  async function openAutosave(entry) {
+    if (blocked()) return;
+    autoSaveCurrent(); // the buffer being replaced gets its own snapshot first
+    let code;
+    try {
+      code = await fetchAutosave(entry.file);
+    } catch (err) {
+      console.error(err);
+      onStatus?.('could not read that snapshot', 'error');
+      return;
+    }
+    const home = songs.find((s) => sanitize(s.name) === entry.name);
+    if (home) {
+      currentId = home.id;
+      home.code = code;
+    } else {
+      const song = { id: uid(), name: entry.name, code, saved: false, savedAt: 0 };
+      songs.push(song);
+      currentId = song.id;
+    }
+    persistSongs(songs);
+    setCurrentId(currentId);
+    setCode(code);
+    view = 'songs';
+    selected = Math.max(0, songs.findIndex((s) => s.id === currentId));
+    renderFilename();
+    onStatus?.(`restored ${entry.name} from ${shortWhen(entry.savedAt)} — :save to keep it`);
+    close();
   }
 
   // --- panel open/close ----------------------------------------------------
@@ -339,6 +602,9 @@ export async function setupSongsPanel({
   function open() {
     isOpen = true;
     panel.classList.add('open');
+    // Always open at the top level; the folder is somewhere you go, not a place
+    // to be dropped back into later.
+    view = 'songs';
     // Start navigation on the current song.
     selected = Math.max(0, songs.findIndex((s) => s.id === currentId));
     renderList();
@@ -352,6 +618,7 @@ export async function setupSongsPanel({
 
   function close() {
     isOpen = false;
+    hideCmdline();
     panel.classList.remove('open');
     focusEditor();
   }
@@ -359,6 +626,56 @@ export async function setupSongsPanel({
   function toggle() {
     isOpen ? close() : open();
   }
+
+  // --- the panel's own command line ----------------------------------------
+  //
+  // ":" opens it. The only command is :q, which pops out of the AutoSaves/
+  // folder, or closes the panel when there's nowhere further up to go — the
+  // same thing :q means everywhere else in the app.
+
+  function hideCmdline() {
+    if (!cmdEl) return;
+    cmdEl.hidden = true;
+    if (cmdInput) cmdInput.value = '';
+  }
+
+  function showCmdline() {
+    if (!cmdEl || !cmdInput) return;
+    cmdEl.hidden = false;
+    cmdInput.value = '';
+    cmdInput.focus();
+  }
+
+  function runCommand(raw) {
+    const cmd = raw.trim();
+    hideCmdline();
+    if (cmd === 'q' || cmd === 'quit') {
+      if (view === 'autosaves') {
+        leaveAutosaves();
+        panel.focus();
+      } else {
+        close();
+      }
+      return;
+    }
+    if (cmd) onStatus?.(`not a panel command: :${cmd}`, 'error');
+    panel.focus();
+  }
+
+  cmdInput?.addEventListener('keydown', (e) => {
+    // The panel's own keydown handler is an ancestor listener; without this it
+    // would read every keystroke here as navigation.
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      runCommand(cmdInput.value);
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      hideCmdline();
+      panel.focus();
+      e.preventDefault();
+    }
+  });
+  cmdInput?.addEventListener('blur', hideCmdline);
 
   // --- panel keyboard navigation (vim-style) -------------------------------
 
@@ -375,9 +692,24 @@ export async function setupSongsPanel({
   }
 
   function move(delta) {
-    if (songs.length === 0) return;
-    selected = Math.max(0, Math.min(songs.length - 1, selected + delta));
+    const count = rowCount();
+    if (count === 0) return;
+    selected = Math.max(0, Math.min(count - 1, selected + delta));
     renderList();
+  }
+
+  function activate() {
+    if (view === 'autosaves') {
+      const entry = autosaves[selected];
+      if (entry) openAutosave(entry);
+      return;
+    }
+    if (selected === songs.length) {
+      enterAutosaves();
+      return;
+    }
+    const song = songs[selected];
+    if (song) openSong(song.id);
   }
 
   panel.addEventListener('keydown', (e) => {
@@ -395,8 +727,11 @@ export async function setupSongsPanel({
     } else if (pending === 'd') {
       clearPending();
       if (e.key === 'd') {
-        const song = songs[selected];
-        if (song) deleteSong(song.id);
+        // Snapshots aren't deleted by hand — AutoSaves/ prunes itself.
+        if (view === 'songs' && selected < songs.length) {
+          const song = songs[selected];
+          if (song) deleteSong(song.id);
+        }
         e.preventDefault();
         return;
       }
@@ -414,7 +749,7 @@ export async function setupSongsPanel({
         e.preventDefault();
         break;
       case 'G':
-        selected = songs.length - 1;
+        selected = Math.max(0, rowCount() - 1);
         renderList();
         e.preventDefault();
         break;
@@ -426,12 +761,14 @@ export async function setupSongsPanel({
         setPending('d');
         e.preventDefault();
         break;
-      case 'Enter': {
-        const song = songs[selected];
-        if (song) openSong(song.id);
+      case ':':
+        showCmdline();
         e.preventDefault();
         break;
-      }
+      case 'Enter':
+        activate();
+        e.preventDefault();
+        break;
       case 'Escape':
         close();
         e.preventDefault();
@@ -476,6 +813,7 @@ export async function setupSongsPanel({
 
   return {
     autoSaveCurrent,
+    saveCurrent,
     open,
     close,
     toggle,

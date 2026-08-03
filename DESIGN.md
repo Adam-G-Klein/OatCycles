@@ -146,9 +146,11 @@ o-prefixed commands are only `omap`/`onoremap`/`omapclear`; there is no stock `o
 | `:o` | ex | Open the songs side panel | `editor/editor.js` → `songs/songs.js` |
 | `:name <filename>` | ex | Rename the current song | `editor/editor.js` → `songs/songs.js` |
 | `:new [name]` | ex | Start a fresh (blank) song; auto-names if omitted | `editor/editor.js` → `songs/songs.js` |
+| `:save [name]` | ex | Write the buffer to `SavedSongs/`; with a different name, fork it to a new file and leave the old one alone | `editor/editor.js` → `songs/songs.js` |
 | `:writeout [path]` | ex | Copy the buffer to any path on disk (backup); bare repeats the last path for this song | `editor/editor.js` → `songs/writeout.js` |
 | `:mini` / `:nmini` | ex | Show / hide the mini-notation cheatsheet in the bottom dock (shares that space with `:kyb`) | `editor/editor.js` → `editor/cheatsheet.js` |
 | `:peruse` | ex | Append (or refresh in place) a browsable index of every sound the buffer's `samples()` calls import | `editor/editor.js` → `editor/peruse.js` |
+| `:banks` / `:nbanks` | ex | Show / hide the sample banks found in `./samples` in the bottom dock (shares that space with `:kyb` and `:mini`); clicking one opens it in a new song, already perused | `editor/editor.js` → `editor/banks.js` |
 | `gc` | normal + visual | Toggle line comment | `editor/editor.js` |
 | `kj` | insert | Escape to normal mode | `editor/editor.js` |
 
@@ -181,6 +183,24 @@ So auditioning is "change a number, `:w`". Pitch-mapped banks (piano, vcsl) get 
 knob instead of `n`, since `n` doesn't select there. Re-running replaces the block
 between its `// >>> peruse` / `// <<< peruse` markers, carrying the index values and
 which bank's line is uncommented across — only one plays at a time.
+
+### 5.1a′ Local banks (`:banks`)
+`:peruse` can only index the banks a file already names, which leaves a folder of samples
+on disk invisible until you remember it's there. `:banks` lists what's in `./samples` —
+one folder per bank, either `<bank>/<sound>/01.wav` (variants, picked with `n`) or
+`<bank>/<sound>.wav`, two levels deep at most. The dev server does the scan and serves
+each bank as the `strudel.json` shape Strudel's own `samples()` reads
+(`vite-banks-plugin.js`), so a bank the panel lists is a bank that actually loads — the
+listing can't lie about what will play.
+
+Clicking a bank is the one consequential gesture, so it's behind a confirm: the current
+song is snapshotted, and the bank opens in a **new** song (`peruse casio`) seeded with
+its `samples()` call and run through `:peruse`. Perusing is a change to whatever you were
+writing, so it doesn't happen in the file you were writing.
+
+The manifest route is `/api/banks/<bank>.json` rather than `<bank>/strudel.json` because
+`:peruse` names its generated `const` after the last path segment — the flat form gives
+`const casio`, the nested one would give `const strudel` for every bank on the shelf.
 
 ### 5.1b Song file system (disk-backed persistence)
 Answers open question §8.2. A collapsible right-side panel lists saved songs, persisted
@@ -295,11 +315,14 @@ Dev loop: `pnpm dev` → Chrome at localhost. Ship loop (later): `electron-vite`
   only. (§5.3)
 - ✅ **Transcription quality bar:** proof-of-concept; understandability over accuracy. (§5.3)
 
-- ✅ **Persistence/format:** songs saved as text files on disk (`./songs/<name>.js` +
+- ✅ **Persistence/format:** songs saved as text files on disk (`./SavedSongs/<name>.js` +
   `index.json` manifest) via a Vite dev/preview API, with `localStorage` as a boot cache
-  / offline fallback. Auto-saved on play and before any switch/create/rename/delete.
-  In-browser song panel with vim navigation. (§5.1b) Electron (M4) can reuse the same
-  `/api/songs` shape against the native FS.
+  / offline fallback. Saving and autosaving are separate stores: `:save` is the only
+  thing that writes `SavedSongs/`, while every play appends a timestamped snapshot to
+  `./AutoSaves/<name>_auto_<date>_<time>.js`, which can never overwrite anything.
+  Snapshots are deduped, pruned to the newest 30 per song, and browsable from the song
+  panel (⏎ into `AutoSaves/`, `:q` back). In-browser song panel with vim navigation.
+  (§5.1b) Electron (M4) can reuse the same `/api/songs` shape against the native FS.
 
 **Still open:**
 1. **Core-patch maintenance:** M4 patches `superdough`. How do we track upstream? (Vendor

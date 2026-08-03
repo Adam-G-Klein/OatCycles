@@ -119,11 +119,14 @@ const handlers = {
   onRenameSong: null,
   onNewSong: null,
   onCopySong: null,
+  onSaveSong: null,
   onWriteOut: null,
   onShowKeyboard: null,
   onHideKeyboard: null,
   onShowMini: null,
   onHideMini: null,
+  onShowBanks: null,
+  onHideBanks: null,
   onFormat: null,
   onPeruse: null,
   onStatus: null,
@@ -181,6 +184,14 @@ function registerVimCommands() {
   // lines) intent maps here rather than to a partial abbreviation.
   Vim.defineEx('copy', 'copy', () => handlers.onCopySong?.());
 
+  // :save [name] — write the current buffer to SavedSongs/. The only command
+  // that does: playing only ever appends a snapshot to AutoSaves/. With a name
+  // that differs from the current song's, the buffer is copied to a new file
+  // under that name and the old song's file is left alone.
+  //
+  // Full name as the ex-prefix so `:s` keeps stock vim's :substitute.
+  Vim.defineEx('save', 'save', (cm, params) => handlers.onSaveSong?.(params.argString));
+
   // :writeout [path] — write the current buffer to an arbitrary file on disk,
   // for redundancy (a git repo, a synced folder, a backup dir). argString
   // rather than args, so paths with spaces survive. With no path it reuses the
@@ -202,6 +213,13 @@ function registerVimCommands() {
   // `:n` (next) are left alone.
   Vim.defineEx('mini', 'mini', () => handlers.onShowMini?.());
   Vim.defineEx('nmini', 'nmini', () => handlers.onHideMini?.());
+
+  // :banks — list the sample banks on this machine in the same bottom dock as
+  // the two above (all three are mutually exclusive; see main.js). :nbanks
+  // hides it. Full names as the ex-prefixes, so `:b` (stock vim's :buffer) is
+  // left alone.
+  Vim.defineEx('banks', 'banks', () => handlers.onShowBanks?.());
+  Vim.defineEx('nbanks', 'nbanks', () => handlers.onHideBanks?.());
 
   // :peruse — append (or refresh) a browsable index of every sound the file's
   // samples() calls import. See src/editor/peruse.js. Full name as the
@@ -247,6 +265,8 @@ export function createEditor({
   onHideKeyboard,
   onShowMini,
   onHideMini,
+  onShowBanks,
+  onHideBanks,
   onStatus,
   vimMode = false,
 }) {
@@ -256,6 +276,8 @@ export function createEditor({
   handlers.onHideKeyboard = onHideKeyboard;
   handlers.onShowMini = onShowMini;
   handlers.onHideMini = onHideMini;
+  handlers.onShowBanks = onShowBanks;
+  handlers.onHideBanks = onHideBanks;
   handlers.onStatus = onStatus;
   registerVimCommands();
 
@@ -479,11 +501,19 @@ export function createEditor({
 
   // Fill in the songs-panel command callbacks after the panel is constructed
   // (main.js builds the editor first, then the panel, then wires these).
-  function setSongCommands({ onOpenSongs, onRenameSong, onNewSong, onCopySong, onWriteOut }) {
+  function setSongCommands({
+    onOpenSongs,
+    onRenameSong,
+    onNewSong,
+    onCopySong,
+    onSaveSong,
+    onWriteOut,
+  }) {
     handlers.onOpenSongs = onOpenSongs;
     handlers.onRenameSong = onRenameSong;
     handlers.onNewSong = onNewSong;
     handlers.onCopySong = onCopySong;
+    handlers.onSaveSong = onSaveSong;
     handlers.onWriteOut = onWriteOut;
   }
 

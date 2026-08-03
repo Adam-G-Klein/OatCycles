@@ -1,16 +1,24 @@
 import { defineConfig } from 'vite';
 import { songsPlugin } from './vite-songs-plugin.js';
 import { writeoutPlugin } from './vite-writeout-plugin.js';
+import { banksPlugin } from './vite-banks-plugin.js';
 
 // The vendored strudel-upstream clone is only needed for later core patches
 // (M4 superdough sustain). Keep Vite from crawling its example apps.
 export default defineConfig({
-  // Persist songs as real text files under ./songs (dev + preview). Without
-  // this the song panel is localStorage-only and vanishes when the browser is
-  // cleared. See vite-songs-plugin.js.
+  // Persist songs as real text files under ./SavedSongs, with timestamped
+  // snapshots under ./AutoSaves (dev + preview). Without this the song panel is
+  // localStorage-only and vanishes when the browser is cleared. Only an explicit
+  // :save writes SavedSongs; playing writes a snapshot. See vite-songs-plugin.js.
   // `:writeout <path>` copies the current buffer to any path on disk (backups
   // outside the app's own store). See vite-writeout-plugin.js.
-  plugins: [songsPlugin({ dir: 'songs' }), writeoutPlugin()],
+  // `:banks` lists the sample folders under ./samples and serves each one as a
+  // strudel.json the engine can actually load. See vite-banks-plugin.js.
+  plugins: [
+    songsPlugin({ dir: 'SavedSongs', autoDir: 'AutoSaves', keep: 30 }),
+    writeoutPlugin(),
+    banksPlugin({ dir: 'samples' }),
+  ],
   server: {
     // Honor an injected PORT (e.g. preview harness) but default to 5173 for
     // the normal `oat` dev workflow.

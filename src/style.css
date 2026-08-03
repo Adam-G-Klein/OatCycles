@@ -49,6 +49,38 @@ body {
   gap: 0.5rem;
 }
 
+/* Muted play — deliberately quieter than Play so the loud one stays the
+   obvious default for a human. */
+#play-silent {
+  opacity: 0.75;
+}
+
+#play-silent:hover {
+  opacity: 1;
+}
+
+/* ?agent=1 banner. Loud on purpose: if this is on screen, the session cannot
+   make sound or write songs, and that should never be a surprise. */
+#agent-banner {
+  padding: 0.4rem 0.9rem;
+  background: #4a3a00;
+  color: #ffe9a8;
+  border-bottom: 1px solid #7a6210;
+  font-size: 0.85rem;
+}
+
+#agent-banner code {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+/* In agent mode the normal Play button is muted too, so stop advertising it
+   as the loud one. */
+body.agent-mode #play {
+  opacity: 0.75;
+}
+
 button {
   background: var(--surface);
   color: var(--fg);
@@ -551,6 +583,58 @@ button:hover {
   font-size: 0.6rem;
 }
 
+/* A song with no file behind it yet — it lives in localStorage and in its
+   autosaves until :save writes it to SavedSongs/. */
+.song-unsaved {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+/* The AutoSaves/ row at the foot of the list: ⏎ descends into it, :q comes
+   back. Styled as a directory, not a song. */
+.song-row.folder .song-name {
+  color: var(--muted);
+}
+
+.song-row.folder {
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+}
+
+/* When did this snapshot happen — right-aligned against the song name. */
+.song-when {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#song-cmdline {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.75rem;
+  border-top: 1px solid var(--border);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--fg);
+}
+
+#song-cmdline[hidden] {
+  display: none;
+}
+
+#song-cmdline input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
 #song-panel-hint {
   padding: 0.5rem 0.75rem;
   border-top: 1px solid var(--border);
@@ -662,6 +746,95 @@ button:hover {
 .mini-ref-card dd {
   margin: 0;
   color: var(--fg);
+}
+
+/* Local sample banks (src/editor/banks.js), the third occupant of the bottom
+   dock — :banks shows, :nbanks hides. Same [hidden] on/off and the same
+   content-driven height with a ceiling as the cheatsheet above. */
+#banks-ref {
+  flex: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.6rem 0.9rem 0.9rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+#banks-ref[hidden] {
+  display: none;
+}
+
+.banks-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.banks-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* "reading samples/…", "no banks yet", and the couldn't-read-the-disk case. */
+.banks-note {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.banks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.5rem;
+}
+
+.bank-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.bank-card:hover:not(:disabled),
+.bank-card:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* A bank we found no readable audio in. Still listed — seeing it greyed out is
+   how you learn the folder is one level too deep, or full of aiffs we skip. */
+.bank-card:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.bank-name {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: #9ece6a;
+  overflow-wrap: anywhere;
+}
+
+.bank-counts {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Mouse-hover documentation tooltip (src/editor/docs.js). Sits inside

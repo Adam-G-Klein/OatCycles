@@ -26,6 +26,29 @@ function loadMidi() {
   return midiModulePromise;
 }
 
+// Panic: silence anything still ringing on external hardware. The audio graph's
+// own panic can't reach MIDI — it leaves the machine entirely — so a pattern
+// routed through .midi() needs its own note-offs. Called by the second press of
+// Stop (see main.js).
+//
+// Deliberately passive: if MIDI was never enabled there is nothing to hang, and
+// asking for Web MIDI here would raise a permission prompt on a keypress whose
+// whole purpose is to make things quieter.
+export function panicMidi() {
+  if (!midiModulePromise) return;
+  midiModulePromise
+    .then(({ WebMidi }) => {
+      if (!WebMidi?.enabled) return;
+      for (const output of WebMidi.outputs) {
+        // CC 120 before CC 123: all-notes-off only lifts held keys, so a voice
+        // already in its release stage ignores it. Both go to all 16 channels.
+        output.sendAllSoundOff();
+        output.sendAllNotesOff();
+      }
+    })
+    .catch((err) => console.error(err));
+}
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 function noteName(n) {
   return NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);

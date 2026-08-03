@@ -4,8 +4,18 @@ dist/
 *.log
 strudel-upstream/
 
-# On-disk song files written by the app (personal content). Un-ignore this if
-# you'd like to version/back-up your songs alongside the code. Leading slash so
-# this only matches the repo-root directory — unanchored, it also swallowed
-# src/songs/, which is source.
+# The pre-split song store, kept on disk as a backup after its contents moved
+# into SavedSongs/. Leading slash so this only matches the repo-root directory —
+# unanchored, it also swallowed src/songs/, which is source.
 /songs/
+
+# Timestamped snapshots taken on every play. SavedSongs/ *is* tracked — those
+# are the deliberate saves, worth versioning — but autosave churn would dirty
+# the working tree on every play, so it stays out.
+/AutoSaves/
+
+# Local sample banks, listed by :banks (see vite-banks-plugin.js). The audio is
+# the user's own library — often large, often not ours to redistribute — so the
+# directory is tracked only through its README.
+/samples/*
+!/samples/README.md
