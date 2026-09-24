@@ -32,6 +32,22 @@ samples/
 - A bank showing "no audio found" means the folder is empty of those, or its
   audio is a level too deep.
 
+## Naming sounds so `.bank()` works
+
+Name a bank's sounds `<prefix>_<part>` and Strudel's `.bank("<prefix>")` reaches
+them by the bare part, the same way `.bank("RolandTR909")` reaches
+`RolandTR909_bd`. `sounds-from-la/` is laid out like that:
+
+```js
+samples('/api/banks/sounds-from-la.json')
+
+s("bd*2 [sd cp] ~ bd:3, hh*8").bank("la")
+```
+
+Its parts are `bd sd cp hh perc tb 808 bass fx hit song`. `song` holds full-length
+tracks for chopping. `sounds-from-la/INDEX.md` maps each `n()` back to the pack's
+original filename.
+
 ## What's tracked
 
 Nothing but this file — see `.gitignore`. The audio in here is your library,
