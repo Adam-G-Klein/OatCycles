@@ -19,3 +19,8 @@ strudel-upstream/
 # directory is tracked only through its README.
 /samples/*
 !/samples/README.md
+
+# Offline mode (see OFFLINE.md): the disk copy of internet-hosted sounds, and
+# the strudel.cc docs mirror. Both are rebuilt by `npm run offline`.
+/offline-cache/
+/offline-docs/

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Strudel docs (offline)</title>
+    <!-- Copied into offline-docs/strudel.cc by scripts/offline-docs.mjs. -->
+    <style>
+      :root { color-scheme: dark; --bg: #16161a; --fg: #e6e6e6; --dim: #8a8a93; --acc: #c9a6ff; --hl: #ffe08a33; }
+      body { background: var(--bg); color: var(--fg); font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 0 auto; max-width: 860px; padding: 24px 16px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      p.note { color: var(--dim); margin: 0 0 16px; }
+      input { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #333; background: #0e0e11; color: var(--fg); }
+      ul { list-style: none; padding: 0; }
+      li { padding: 8px 0; border-bottom: 1px solid #26262c; }
+      a { color: var(--acc); text-decoration: none; font-weight: 600; }
+      .path { color: var(--dim); font-size: 12px; margin-left: 8px; }
+      .snip { color: var(--dim); font-size: 13px; margin-top: 2px; }
+      mark { background: var(--hl); color: inherit; }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 24px 0 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Strudel docs — offline mirror</h1>
+    <p class="note">strudel.cc's own search needs the internet; this one searches the mirrored pages' full text. Type <code>/</code> to focus.</p>
+    <input id="q" placeholder="Search: jux, scale, sometimes, .bank, wavetable…" autofocus />
+    <div id="out"></div>
+    <script>
+      const out = document.getElementById('out');
+      const q = document.getElementById('q');
+      const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      let pages = [];
+      function render() {
+        const term = q.value.trim().toLowerCase();
+        history.replaceState(null, '', term ? '?q=' + encodeURIComponent(term) : location.pathname);
+        if (!term) {
+          const groups = {};
+          for (const p of pages) (groups[p.path.split('/')[1]] ??= []).push(p);
+          out.innerHTML = Object.entries(groups)
+            .map(([g, ps]) => `<h2>${esc(g)}</h2><ul>${ps.map((p) => `<li><a href="${esc(p.path)}">${esc(p.title)}</a><span class="path">${esc(p.path)}</span></li>`).join('')}</ul>`)
+            .join('');
+          return;
+        }
+        const hits = pages
+          .map((p) => {
+            const inTitle = p.title.toLowerCase().includes(term) || p.path.includes(term);
+            const at = p.text.toLowerCase().indexOf(term);
+            const count = at < 0 ? 0 : p.text.toLowerCase().split(term).length - 1;
+            return { p, score: (inTitle ? 1000 : 0) + count, at };
+          })
+          .filter((h) => h.score > 0)
+          .sort((a, b) => b.score - a.score);
+        out.innerHTML = `<ul>${hits
+          .map(({ p, at }) => {
+            const snip = at < 0 ? '' : p.text.slice(Math.max(0, at - 80), at + 120);
+            const marked = esc(snip).replace(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), (m) => `<mark>${m}</mark>`);
+            return `<li><a href="${esc(p.path)}">${esc(p.title)}</a><span class="path">${esc(p.path)}</span><div class="snip">…${marked}…</div></li>`;
+          })
+          .join('')}</ul>` + (hits.length ? '' : '<p class="note">No matches.</p>');
+      }
+      q.addEventListener('input', render);
+      addEventListener('keydown', (e) => { if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); } });
+      fetch('/offline-index.json').then((r) => r.json()).then((data) => {
+        pages = data;
+        q.value = new URLSearchParams(location.search).get('q') ?? '';
+        render();
+      });
+    </script>
+  </body>
+</html>

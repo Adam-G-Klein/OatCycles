@@ -8,7 +8,11 @@
     "dev": "vite --open",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "offline": "node scripts/offline-prefetch.mjs && node scripts/offline-docs.mjs && node scripts/offline-edm-bank.mjs",
+    "offline:sounds": "node scripts/offline-prefetch.mjs",
+    "offline:docs": "node scripts/offline-docs.mjs",
+    "offline:edm": "node scripts/offline-edm-bank.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
