@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { diskPayload, mergeSongs } from '../src/songs/storage.js';
+import { diskPayload, mergeSongs, createSaver } from '../src/songs/storage.js';
 
 test('a song that was never saved never reaches disk', () => {
   const payload = diskPayload([
@@ -75,4 +75,61 @@ test('records written before the split count as saved', () => {
   );
   assert.equal(song.saved, true);
   assert.equal(song.code, 'edits');
+});
+
+// --- the saver: when a disk write actually happens -----------------------------
+//
+// createSaver needs a few browser globals. These stubs record what would have
+// reached the dev server, so a test can assert that nothing did.
+function browserStubs() {
+  const sent = [];
+  const listeners = {};
+  const store = new Map();
+  globalThis.window = { addEventListener: (type, fn) => (listeners[type] = fn) };
+  globalThis.localStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { sendBeacon: (url, blob) => sent.push(['beacon', url, blob]) },
+    configurable: true,
+  });
+  globalThis.fetch = async (url, init) => {
+    sent.push([init?.method ?? 'GET', url]);
+    return { ok: true };
+  };
+  return { sent, unload: () => listeners.pagehide?.() };
+}
+
+const loadedFromDisk = () =>
+  mergeSongs(
+    [],
+    [
+      { id: 'a', name: 'dave1', code: 'file a', savedAt: 1 },
+      { id: 'b', name: 'tico', code: 'file b', savedAt: 2 },
+    ],
+  );
+
+test('leaving a page that saved nothing writes nothing to disk', () => {
+  // Opening the app and navigating away used to beacon every saved song back
+  // to the server, rewriting every file in SavedSongs/ with identical text.
+  const { sent, unload } = browserStubs();
+  const songs = loadedFromDisk();
+  const saver = createSaver({ onDisk: true, initial: songs });
+  songs[0].code = 'buffer edits, not saved'; // the unload path mirrors the buffer
+  saver.save(songs);
+  unload();
+  assert.deepEqual(sent, []);
+});
+
+test('leaving right after a :save still flushes it', () => {
+  const { sent, unload } = browserStubs();
+  const songs = loadedFromDisk();
+  const saver = createSaver({ onDisk: true, initial: songs });
+  songs[0].diskCode = songs[0].code = 'new take'; // what saveCurrent does
+  saver.save(songs);
+  unload();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], 'beacon');
 });

@@ -129,7 +129,7 @@ export async function setupSongsPanel({
   // One saver per session: writes localStorage synchronously and flushes to
   // disk (debounced). `persistSongs` is the single funnel for every mutation.
   // Only songs the user has saved reach the files — see storage.js diskPayload.
-  const saver = createSaver({ onDisk });
+  const saver = createSaver({ onDisk, initial: loaded });
   // A guest, or an agent-driven page, keeps its localStorage mirror but writes
   // no files: the buffer on screen isn't theirs to commit to anyone's disk.
   const persistSongs = (list) => saver.save(list, { skipDisk: suppressSave() });

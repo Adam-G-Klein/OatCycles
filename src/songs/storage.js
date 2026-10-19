@@ -193,10 +193,18 @@ export async function loadSongs() {
 // Build a saver bound to this session. localStorage is written synchronously on
 // every call (never lose the in-memory state); the disk write is debounced so a
 // burst of edits collapses into a single request.
-export function createSaver({ onDisk, delay = 400 } = {}) {
+//
+// `initial` is the song list as loaded. Its disk payload is what the files say
+// right now, so it seeds `lastSent`: without that, the first flush of a fresh
+// page — typically the unload beacon, which fires on every refresh or
+// navigation — rewrote every file in SavedSongs/ even when nothing was saved.
+// Worse, a page left open while another tab saved would put its stale copy
+// back over the newer files.
+export function createSaver({ onDisk, delay = 400, initial = null } = {}) {
   let timer = null;
   let latest = null;
-  let lastSent = null; // JSON of the last payload the files agree with
+  // JSON of the last payload the files agree with
+  let lastSent = initial ? JSON.stringify(diskPayload(initial)) : null;
 
   async function flushDisk() {
     if (!onDisk || latest === null) return;
