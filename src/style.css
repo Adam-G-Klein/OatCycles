@@ -984,3 +984,11 @@ button:hover {
 .cm-editor.cm-focused {
   outline: none;
 }
+
+/* ⏺ Rec lights up red while a take is running; tabular digits keep the timer
+   from jittering the topbar as it counts. */
+#rec.on {
+  border-color: #f7768e;
+  color: #f7768e;
+  font-variant-numeric: tabular-nums;
+}

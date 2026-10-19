@@ -15,6 +15,8 @@ import {
 import { registerSoundfonts } from './sounds/soundfonts.js';
 import { createSilentMode } from './silent.js';
 import { panicAudio } from './panic.js';
+import { createRecorder } from './recorder/recorder.js';
+import { peakDb, recordingFilename } from './recorder/wav.js';
 import { Drawer, getDrawContext } from '@strudel/draw';
 import { createEditor } from './editor/editor.js';
 import { setupCheatsheet } from './editor/cheatsheet.js';
@@ -692,9 +694,74 @@ async function panic() {
     // re-applied to the new node: otherwise a panic would un-mute an agent
     // session, and the next silentPlay would come out of the speakers.
     silentMode.set(silentMode.silent);
+    // Same teardown replaced the merger the recorder taps; follow it now
+    // rather than waiting for the recorder's own periodic check.
+    recorder.retap();
   }
   setStatus('all sound cut');
 }
+
+// --- recording ----------------------------------------------------------------
+//
+// ⏺ Rec captures the master mix (pre-mute, so a 🔇 play records too) and, on
+// the second press, downloads it as a .wav named after the song. Recording is
+// independent of the transport: start it before Play to catch the first beat,
+// stop it after Stop to keep the tail.
+//
+// Under ?agent=1 nothing is downloaded — that would be a write to disk — and
+// the take is only kept on window.oat.lastRecording.
+const recorder = createRecorder({ getController: getSuperdoughAudioController });
+const recBtn = document.getElementById('rec');
+let recTimer = null;
+let lastRecording = null;
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+async function startRecording() {
+  if (recorder.recording) return false;
+  try {
+    await strudelReady;
+    await recorder.start();
+  } catch (err) {
+    console.error(err);
+    setStatus('record error: ' + err.message, 'error');
+    return false;
+  }
+  recBtn.classList.add('on');
+  const tick = () => (recBtn.textContent = `⏹ ${clock(recorder.elapsed)}`);
+  tick();
+  recTimer = setInterval(tick, 250);
+  return true;
+}
+
+async function stopRecording() {
+  if (!recorder.recording) return null;
+  clearInterval(recTimer);
+  recBtn.classList.remove('on');
+  recBtn.textContent = '⏺ Rec';
+  const take = await recorder.stop();
+  const filename = recordingFilename(songs?.currentName());
+  lastRecording = { ...take, filename };
+  const clipped = take.peak > 1 ? ' — clipped, try a lower .gain()' : '';
+  const summary = `${clock(take.seconds)} · peak ${peakDb(take.peak)}${clipped}`;
+  if (AGENT_MODE) {
+    setStatus(`recorded ${summary} (agent mode: not downloaded)`, take.peak > 1 ? 'error' : '');
+    return lastRecording;
+  }
+  const url = URL.createObjectURL(take.blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Give the download a moment to pick the blob up before letting it go.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  setStatus(`saved ${filename} · ${summary}`, take.peak > 1 ? 'error' : '');
+  return lastRecording;
+}
+
+recBtn.addEventListener('click', () =>
+  recorder.recording ? stopRecording() : startRecording(),
+);
 
 document.getElementById('play').addEventListener('click', () => play());
 document.getElementById('play-silent').addEventListener('click', () =>
@@ -718,6 +785,14 @@ window.oat = {
   // first — what a second press of Stop does.
   panic,
   getCode: () => editor.getCode(),
+  // Record the master output (pre-mute, so it works in silent mode). stop
+  // resolves to { blob, seconds, peak, bytes, filename }; under ?agent=1 it is
+  // never downloaded.
+  startRecording,
+  stopRecording,
+  get lastRecording() {
+    return lastRecording;
+  },
   get silent() {
     return silentMode.silent;
   },
