@@ -48,6 +48,14 @@
           <input type="checkbox" id="midi-type" disabled />
           <span>Type notes</span>
         </label>
+        <label id="midi-capture-toggle" title="Capture rhythm too: record a take, then insert quantized notes with timing on stop">
+          <input type="checkbox" id="midi-capture" disabled />
+          <span>+ timing</span>
+        </label>
+        <label id="midi-bpm-label" title="Tempo the take is snapped to">
+          <input type="number" id="midi-bpm" value="120" min="40" max="300" step="1" disabled />
+          <span>BPM</span>
+        </label>
         <span id="midi-activity" title="Note-on activity">●</span>
       </div>
       <div id="voice" title="Sing a melody → editable Strudel code (Chrome)">
@@ -150,6 +158,12 @@
       id="banks-ref"
       title="Local sample banks (:banks / :nbanks)"
       aria-label="Local sample banks"
+      hidden
+    ></div>
+    <div
+      id="drumkit-ref"
+      title="Drum-kit reference (:drums / :ndrums)"
+      aria-label="Drum-kit reference"
       hidden
     ></div>
     <script type="module" src="/src/main.js"></script>

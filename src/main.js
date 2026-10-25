@@ -20,6 +20,7 @@ import { peakDb, recordingFilename } from './recorder/wav.js';
 import { Drawer, getDrawContext } from '@strudel/draw';
 import { createEditor } from './editor/editor.js';
 import { setupCheatsheet } from './editor/cheatsheet.js';
+import { setupDrumkit } from './editor/drumkit.js';
 import { setupBanks, bankSnippet } from './editor/banks.js';
 import { registerSliders } from './editor/slider.js';
 import { expandInterpolations, mapOffset } from './lang/interpolate.js';
@@ -120,6 +121,12 @@ const fullScreenContext = () => (drawContext ??= getDrawContext());
 // from the last rewrite is what puts them back on the user's characters.
 let sourceMap = null;
 
+// When only a selection is evaluated (Cmd-Enter / :w with a highlight), the
+// transpiler reports positions relative to that slice, starting at 0. This is
+// the slice's start in the document, added back so highlight boxes, sliders and
+// visualizers land on the real characters. 0 for a whole-buffer play.
+let evalOffset = 0;
+
 // Highlighting now has two sources: the locations the transpiler found in the
 // buffer, which hold still, and the ranges an interpolated string occupies this
 // cycle, which do not. The editor gets the union of the two.
@@ -151,8 +158,8 @@ const strudelReady = initStrudel({
   // and re-seed the drawer so highlighting matches the new pattern.
   afterEval: ({ pattern, meta }) => {
     staticLocations = (meta?.miniLocations || []).map(([from, to]) => [
-      mapOffset(sourceMap, from),
-      mapOffset(sourceMap, to),
+      mapOffset(sourceMap, from) + evalOffset,
+      mapOffset(sourceMap, to) + evalOffset,
     ]);
     pushLocations();
     // A slider's *identity* is its offset in the transpiled code — the
@@ -161,8 +168,8 @@ const strudelReady = initStrudel({
     const widgets = (meta?.widgets || []).map((widget) => ({
       ...widget,
       srcFrom: widget.from,
-      from: widget.from == null ? widget.from : mapOffset(sourceMap, widget.from),
-      to: widget.to == null ? widget.to : mapOffset(sourceMap, widget.to),
+      from: widget.from == null ? widget.from : mapOffset(sourceMap, widget.from) + evalOffset,
+      to: widget.to == null ? widget.to : mapOffset(sourceMap, widget.to) + evalOffset,
     }));
     editor.updateSliders(widgets);
     editor.updateWidgets(widgets);
@@ -214,6 +221,22 @@ const strudelReady = initStrudel({
     setStatus('engine failed to init', 'error');
   });
 
+// :learn — the strudel.cc docs, mirrored to disk by `npm run offline:docs` and
+// served by the dev server on a port of their own (see vite-offline-plugin.js).
+// The tab is opened before the fetch so the popup blocker sees a user gesture.
+async function openOfflineDocs(term = '') {
+  const tab = window.open('about:blank', '_blank');
+  try {
+    const { docsUrl } = await fetch('/api/offline').then((res) => res.json());
+    if (!docsUrl) throw new Error('no docs mirror yet — run `npm run offline:docs` while online');
+    const q = term.trim();
+    tab.location.href = `${docsUrl}/offline-index.html${q ? `?q=${encodeURIComponent(q)}` : ''}`;
+  } catch (err) {
+    tab?.close();
+    setStatus(`learn: ${err.message}`, 'error');
+  }
+}
+
 // Errors thrown while *querying* a pattern — a ${…} hole that throws, a string
 // that no longer parses as mini-notation — never reach onEvalError: the
 // scheduler catches them per tick, logs them and keeps ticking (cyclist.mjs).
@@ -231,11 +254,17 @@ const vimSaved = localStorage.getItem(VIM_KEY);
 const vimStored = vimSaved === null ? true : vimSaved === 'true';
 
 // The bottom dock: one preview at a time — the reference keyboard (:kyb /
-// :nkyb), the mini-notation cheatsheet (:mini / :nmini), or the list of sample
-// banks on this machine (:banks / :nbanks). They share the space, so showing
-// one hides the other two.
+// :nkyb), the mini-notation cheatsheet (:mini / :nmini), the drum-kit reference
+// (:drums / :ndrums), or the list of sample banks on this machine (:banks /
+// :nbanks). They share the space, so showing one hides the other three.
 const keyboardRef = document.getElementById('keyboard-ref');
 const cheatsheet = setupCheatsheet(document.getElementById('mini-ref'));
+const drumkit = setupDrumkit(document.getElementById('drumkit-ref'), {
+  // Clicking an example is a real, audible play — same as pressing Play with
+  // that string. It doesn't touch the editor buffer (play() takes the code
+  // directly), but like any play it autosaves and replaces what's sounding.
+  onPlay: (code) => play(code),
+});
 const banks = setupBanks(document.getElementById('banks-ref'), {
   onPick: (bank) => peruseBank(bank),
 });
@@ -243,10 +272,11 @@ const banks = setupBanks(document.getElementById('banks-ref'), {
 const editor = createEditor({
   parent: document.getElementById('editor'),
   initialCode: DEFAULT_CODE,
-  onEvaluate: play,
+  onEvaluate: (code, offset) => play(code, { offset }),
   onStop: stop,
   onShowKeyboard: () => {
     cheatsheet.hide();
+    drumkit.hide();
     banks.hide();
     keyboardRef.hidden = false;
     editor.focus();
@@ -257,6 +287,7 @@ const editor = createEditor({
   },
   onShowMini: () => {
     keyboardRef.hidden = true;
+    drumkit.hide();
     banks.hide();
     cheatsheet.show();
     editor.focus();
@@ -265,9 +296,22 @@ const editor = createEditor({
     cheatsheet.hide();
     editor.focus();
   },
+  onShowDrums: () => {
+    keyboardRef.hidden = true;
+    cheatsheet.hide();
+    banks.hide();
+    drumkit.show();
+    editor.focus();
+  },
+  onHideDrums: () => {
+    drumkit.hide();
+    editor.focus();
+  },
+  onLearn: (term) => openOfflineDocs(term),
   onShowBanks: () => {
     keyboardRef.hidden = true;
     cheatsheet.hide();
+    drumkit.hide();
     banks.show();
     editor.focus();
   },
@@ -282,7 +326,10 @@ const editor = createEditor({
 // An interpolated string reports the ranges it occupies whenever its assembled
 // text changes — which, for most patterns, is never after the first cycle.
 setLocationSink((locations) => {
-  dynamicLocations = locations;
+  // Same slice-to-document shift the static locations get in afterEval: an
+  // interpolated string inside an evaluated selection reports its ranges
+  // relative to the slice.
+  dynamicLocations = locations.map(([from, to]) => [from + evalOffset, to + evalOffset]);
   pushLocations();
 });
 
@@ -323,6 +370,8 @@ setupMidiPanel({
   deviceSelect: document.getElementById('midi-device'),
   insertBtn: document.getElementById('midi-insert'),
   typeToggle: document.getElementById('midi-type'),
+  captureToggle: document.getElementById('midi-capture'),
+  bpmInput: document.getElementById('midi-bpm'),
   activity: document.getElementById('midi-activity'),
   onInsertSnippet: (text) => editor.insertAtCursor(text),
   // Note-entry mode: each played key drops its mini-notation token at the cursor.
@@ -631,14 +680,27 @@ editor.setSessionCommands({
 // code among the user's.
 // A normal play always clears the mute — silence is never sticky by accident.
 // Under ?agent=1 every play is silent regardless of what the caller asked for.
-async function play(code = editor.getCode(), { silent = false } = {}) {
+async function play(code = editor.getCode(), { silent = false, offset = 0 } = {}) {
   const quiet = silent || AGENT_MODE;
+  // How far into the document `code` starts, so highlighting maps back onto the
+  // real characters when only a selection is evaluated. Whole-buffer plays and
+  // standalone snippets (drumkit, silentPlay) start at 0.
+  evalOffset = offset;
+  // Snapshot the buffer into AutoSaves/ on every play — except a silent one,
+  // whose whole point is to leave the user's work untouched. The song's own
+  // file is not written here; :save is the only thing that writes it.
+  // It runs before, and apart from, the eval below: code that fails to play is
+  // still snapshotted, and a failed snapshot never stops the play.
+  if (!quiet) {
+    try {
+      await songsReady; // ensure the disk-loaded song is current before saving
+      songs?.autoSaveCurrent();
+    } catch (err) {
+      console.error(err);
+      setStatus('autosave failed: ' + err.message, 'error');
+    }
+  }
   try {
-    await songsReady; // ensure the disk-loaded song is current before saving
-    // Snapshot the buffer into AutoSaves/ on every play — except a silent one,
-    // whose whole point is to leave the user's work untouched. The song's own
-    // file is not written here; :save is the only thing that writes it.
-    if (!quiet) songs?.autoSaveCurrent();
     await strudelReady;
     // Mute BEFORE evaluating: evaluate() starts the scheduler, and a gap here
     // is an audible gap. If the graph isn't up we refuse rather than play loud.

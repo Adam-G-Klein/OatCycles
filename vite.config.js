@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import { songsPlugin } from './vite-songs-plugin.js';
 import { writeoutPlugin } from './vite-writeout-plugin.js';
 import { banksPlugin } from './vite-banks-plugin.js';
+import { holdReloadPlugin } from './vite-hold-reload-plugin.js';
+import { offlinePlugin } from './vite-offline-plugin.js';
 
 // The vendored strudel-upstream clone is only needed for later core patches
 // (M4 superdough sustain). Keep Vite from crawling its example apps.
@@ -18,13 +20,21 @@ export default defineConfig({
     songsPlugin({ dir: 'SavedSongs', autoDir: 'AutoSaves', keep: 30 }),
     writeoutPlugin(),
     banksPlugin({ dir: 'samples' }),
+    // Don't let an agent's (or your own) source edits full-reload a live
+    // composing session. Manual refresh pulls new code in. `OAT_HMR=1` opts
+    // back into stock HMR. See vite-hold-reload-plugin.js.
+    holdReloadPlugin(),
+    // Internet-hosted sounds (default banks, `github:` banks, GM soundfonts)
+    // are served through ./offline-cache, and the strudel.cc docs mirror is
+    // served on :5180 — so the app works on a plane. See OFFLINE.md.
+    offlinePlugin(),
   ],
   server: {
     // Honor an injected PORT (e.g. preview harness) but default to 5173 for
     // the normal `oat` dev workflow.
     port: Number(process.env.PORT) || 5173,
     watch: {
-      ignored: ['**/strudel-upstream/**'],
+      ignored: ['**/strudel-upstream/**', '**/offline-cache/**', '**/offline-docs/**'],
     },
   },
   optimizeDeps: {

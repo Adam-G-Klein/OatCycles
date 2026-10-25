@@ -134,6 +134,26 @@ export async function setupSongsPanel({
   // no files: the buffer on screen isn't theirs to commit to anyone's disk.
   const persistSongs = (list) => saver.save(list, { skipDisk: suppressSave() });
 
+  // Auto-save on refresh. Plain typing doesn't persist the buffer — only play,
+  // :save and switching songs do — and with HMR full-reloads now held (see
+  // vite-hold-reload-plugin.js), a *manual* refresh is how new code arrives.
+  // Mirror the live buffer into the current song on the way out so that refresh
+  // never drops in-flight edits. saveLocal is synchronous, so localStorage
+  // always has it for restore; flushOnUnload beacons the same buffer to disk.
+  // Guests/agents keep the suppressSave() guard, so nothing of theirs is written.
+  let bufferFlushed = false;
+  function flushBuffer() {
+    if (bufferFlushed || suppressSave()) return;
+    const c = current();
+    if (!c) return;
+    c.code = getCode();
+    persistSongs(songs);
+    saver.flushOnUnload();
+    bufferFlushed = true;
+  }
+  window.addEventListener('pagehide', flushBuffer);
+  window.addEventListener('beforeunload', flushBuffer);
+
   // --- bootstrap: guarantee there is always a valid current song ----------
   if (songs.length === 0) {
     // First run ever: seed one song from whatever the editor already holds
@@ -293,13 +313,20 @@ export async function setupSongsPanel({
     if (!c) return;
     const code = getCode();
     c.code = code;
-    persistSongs(songs); // refresh the mirror; saved files stay as they are
-    if (!onDisk) return;
-    // Fire and forget: a snapshot is a background courtesy, and the play it
-    // rides along with shouldn't wait on the network for it.
-    postAutosave({ name: c.name, code }).catch((err) => {
-      console.warn('autosave failed:', err);
-    });
+    // The snapshot goes first: it is the copy that survives, and nothing that
+    // goes wrong afterwards (a full localStorage, say) may cost it.
+    if (onDisk) {
+      // Fire and forget: a snapshot is a background courtesy, and the play it
+      // rides along with shouldn't wait on the network for it.
+      postAutosave({ name: c.name, code }).catch((err) => {
+        console.warn('autosave failed:', err);
+      });
+    }
+    try {
+      persistSongs(songs); // refresh the mirror; saved files stay as they are
+    } catch (err) {
+      console.warn('song mirror save failed:', err);
+    }
   }
 
   // :save [name] — the only path that writes SavedSongs/.

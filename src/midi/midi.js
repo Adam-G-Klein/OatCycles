@@ -1,4 +1,5 @@
 import { evalScope } from '@strudel/web';
+import { midiTake } from './record.js';
 
 // M2 — MIDI keyboard UX (Chrome).
 //
@@ -68,7 +69,10 @@ function snippetFor(deviceName) {
 kb().s("sawtooth").cutoff(1500).lpq(6).gain(0.7)`;
 }
 
-export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle, activity, onInsertSnippet, onInsertNote, onStatus }) {
+const MIN_BPM = 40;
+const MAX_BPM = 300;
+
+export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle, captureToggle, bpmInput, activity, onInsertSnippet, onInsertNote, onStatus }) {
   let WebMidi = null;
   let activeDevice = null;
   let activityListener = null;
@@ -82,8 +86,71 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
   let chordBuffer = [];
   let chordTimer = null;
 
+  // Timing capture: when armed, arming "Type notes" records a whole take
+  // (note-on/off with timestamps) instead of streaming a token per key. Ending
+  // the take quantizes it to a rhythmic snippet (see record.js).
+  let recording = false;
+  let takeEvents = [];
+  const openNotes = new Map(); // midi → index into takeEvents of its note-on
+
   function typingArmed() {
     return !!(typeToggle && typeToggle.checked);
+  }
+
+  function captureArmed() {
+    return !!(captureToggle && captureToggle.checked);
+  }
+
+  function clampBpm() {
+    const bpm = Math.round(Number(bpmInput && bpmInput.value));
+    return Number.isFinite(bpm) ? Math.max(MIN_BPM, Math.min(MAX_BPM, bpm)) : 120;
+  }
+
+  function startTake() {
+    clearChord(); // never mix streamed tokens into a timed take
+    recording = true;
+    takeEvents = [];
+    openNotes.clear();
+    onStatus?.('recording MIDI take… play, then uncheck to insert', 'playing');
+  }
+
+  // Discard an in-progress take without emitting (device change, capture
+  // disarmed). Quiet — nothing was inserted, so nothing to announce.
+  function cancelTake() {
+    recording = false;
+    takeEvents = [];
+    openNotes.clear();
+  }
+
+  function finishTake() {
+    if (!recording) return;
+    recording = false;
+    const events = takeEvents;
+    takeEvents = [];
+    openNotes.clear();
+    if (!events.length) {
+      onStatus?.('no notes recorded');
+      return;
+    }
+    const code = midiTake(events, { bpm: clampBpm() });
+    if (!code) {
+      onStatus?.('no notes recorded');
+      return;
+    }
+    onInsertNote?.(code);
+    onStatus?.('MIDI take inserted ✓ — Ctrl+Enter to play');
+  }
+
+  function recordOn(midiNote, ts) {
+    openNotes.set(midiNote, takeEvents.length);
+    takeEvents.push({ midi: midiNote, on: ts, off: null });
+  }
+
+  function recordOff(midiNote, ts) {
+    const idx = openNotes.get(midiNote);
+    if (idx == null) return;
+    takeEvents[idx].off = ts;
+    openNotes.delete(midiNote);
   }
 
   function flushChord() {
@@ -119,8 +186,10 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
     }
     activeDevice = null;
     activityListener = null;
-    // Drop any half-formed chord so it can't leak into a new device/context.
+    // Drop any half-formed chord or take so it can't leak into a new
+    // device/context.
     clearChord();
+    cancelTake();
   }
 
   function flash(label) {
@@ -143,13 +212,24 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
     if (!device) return;
     activeDevice = device;
     activityListener = (e) => {
-      const noteon = e.message.command === 9 && e.dataBytes[1] > 0;
-      if (!noteon) return;
-      const midiNote = e.dataBytes[0];
-      flash(noteName(midiNote));
-      // When note-entry is armed, feed the note through the chord buffer, which
-      // decides between a bare note and a stack once the window closes.
-      if (typingArmed()) bufferNote(midiNote);
+      const cmd = e.message.command;
+      const noteon = cmd === 9 && e.dataBytes[1] > 0;
+      // A note-off is command 8, or a note-on with velocity 0 (running status).
+      const noteoff = cmd === 8 || (cmd === 9 && e.dataBytes[1] === 0);
+      if (noteon) {
+        const midiNote = e.dataBytes[0];
+        flash(noteName(midiNote));
+        if (recording) {
+          // Timed take: buffer the onset with its timestamp for quantization.
+          recordOn(midiNote, e.timestamp);
+        } else if (typingArmed()) {
+          // Streaming entry: feed the chord buffer, which decides between a bare
+          // note and a stack once the window closes.
+          bufferNote(midiNote);
+        }
+      } else if (noteoff && recording) {
+        recordOff(e.dataBytes[0], e.timestamp);
+      }
     };
     device.addListener('midimessage', activityListener);
   }
@@ -167,6 +247,8 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
       deviceSelect.disabled = true;
       insertBtn.disabled = true;
       if (typeToggle) typeToggle.disabled = true;
+      if (captureToggle) captureToggle.disabled = true;
+      if (bpmInput) bpmInput.disabled = true;
       detachActivity();
       activity.textContent = '●';
       return;
@@ -184,6 +266,8 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
     deviceSelect.disabled = false;
     insertBtn.disabled = false;
     if (typeToggle) typeToggle.disabled = false;
+    if (captureToggle) captureToggle.disabled = false;
+    if (bpmInput) bpmInput.disabled = false;
     attachActivity();
   }
 
@@ -210,6 +294,23 @@ export function setupMidiPanel({ enableBtn, deviceSelect, insertBtn, typeToggle,
 
   enableBtn.addEventListener('click', enable);
   deviceSelect.addEventListener('change', attachActivity);
+
+  // With timing capture armed, "Type notes" becomes record/insert: check it to
+  // start a take, uncheck it to quantize and drop the snippet. Without capture
+  // it stays the streaming per-key path (handled live in the note listener).
+  typeToggle?.addEventListener('change', () => {
+    if (!captureArmed()) return;
+    if (typeToggle.checked) startTake();
+    else finishTake();
+  });
+
+  // Toggling capture mid-arm switches an already-armed session between the two
+  // behaviours: turning it off ends any take in progress; turning it on while
+  // "Type notes" is checked begins one.
+  captureToggle?.addEventListener('change', () => {
+    if (recording && !captureArmed()) finishTake();
+    else if (captureArmed() && typingArmed()) startTake();
+  });
   insertBtn.addEventListener('click', () => {
     const name = selectedName();
     if (name) onInsertSnippet?.(snippetFor(name));

@@ -1,5 +1,13 @@
 # OatCycles — agent instructions
 
+## Workflow: implement right after your questions are answered
+
+This is a personal project and the point is a fast iterate-and-customize loop.
+When a request needs clarifying, ask your questions — but once they're answered,
+go straight to implementing. Don't stop to write a separate spec document or
+wait for a second approval of a plan; the answered questions *are* the go-ahead.
+(You may still think through a design and state it briefly before coding.)
+
 A live-coding music app. A human composes in it, often while you are working.
 Two things you do here are destructive in ways that are not obvious:
 

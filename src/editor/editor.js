@@ -127,8 +127,11 @@ const handlers = {
   onHideMini: null,
   onShowBanks: null,
   onHideBanks: null,
+  onShowDrums: null,
+  onHideDrums: null,
   onFormat: null,
   onPeruse: null,
+  onLearn: null,
   onStatus: null,
   // Networked play: set while a multiplayer session is live, null when solo.
   // Undo has to delegate through these rather than use CodeMirror's stock
@@ -141,12 +144,49 @@ const handlers = {
   onLeaveSession: null,
 };
 
+// What Cmd-Enter / :w should evaluate. With a selection it's just the
+// highlighted text — so you can audition a single line or section without
+// splitting it into its own file — otherwise the whole buffer. Returns the code
+// and the document offset it starts at (0 for the whole buffer), so the
+// transpiler's highlight/slider positions land back on the right characters.
+function selectionOrAll(view) {
+  const { from, to } = view.state.selection.main;
+  if (from === to) return { code: view.state.doc.toString(), offset: 0 };
+  return { code: view.state.doc.sliceString(from, to), offset: from };
+}
+
 function registerVimCommands() {
   if (vimCommandsRegistered) return;
   vimCommandsRegistered = true;
 
-  // :w — evaluate the current buffer (mirrors Ctrl-Enter).
-  Vim.defineEx('write', 'w', () => handlers.onEvaluate?.());
+  // :w — evaluate the current buffer, or just the highlighted lines if there's
+  // a selection (mirrors Ctrl-Enter). cm.cm6 is the underlying EditorView.
+  //
+  // An ex command collapses the visual selection before it runs (vim moves the
+  // cursor to the range), so by the time we're here view.state.selection is
+  // already empty. The selected lines come in `params` instead, as 0-based line
+  // numbers: `selectionLineEnd` is set only when there was a visual selection
+  // or an explicit range, so its presence is what tells a `:'<,'>w` apart from a
+  // plain normal-mode `:w`. Line-granular, which is what an ex range means in
+  // vim; Ctrl-Enter stays character-precise.
+  Vim.defineEx('write', 'w', (cm, params) => {
+    const view = cm.cm6;
+    if (!view) return handlers.onEvaluate?.();
+    const { selectionLine, selectionLineEnd } = params || {};
+    if (selectionLineEnd != null) {
+      const doc = view.state.doc;
+      const a = Math.max(0, Math.min(selectionLine, selectionLineEnd));
+      const b = Math.min(doc.lines - 1, Math.max(selectionLine, selectionLineEnd));
+      const from = doc.line(a + 1).from;
+      const to = doc.line(b + 1).to;
+      return handlers.onEvaluate?.(doc.sliceString(from, to), from);
+    }
+    // No range: a mouse selection made without entering visual mode is left in
+    // the editor selection (exitVisualMode only fires in visual mode), so honor
+    // that too; otherwise the whole buffer.
+    const { code, offset } = selectionOrAll(view);
+    handlers.onEvaluate?.(code, offset);
+  });
 
   // :q — stop playback (mirrors Ctrl-.).
   Vim.defineEx('quit', 'q', () => handlers.onStop?.());
@@ -221,10 +261,22 @@ function registerVimCommands() {
   Vim.defineEx('banks', 'banks', () => handlers.onShowBanks?.());
   Vim.defineEx('nbanks', 'nbanks', () => handlers.onHideBanks?.());
 
+  // :drums — show the drum-kit reference (the abbreviations bd/sd/hh… and a
+  // click-to-play example of each) in the same bottom dock as the three above;
+  // all four are mutually exclusive (see main.js). :ndrums hides it. Full names
+  // as the ex-prefixes, so `:d` (stock vim's :delete) is left alone.
+  Vim.defineEx('drums', 'drums', () => handlers.onShowDrums?.());
+  Vim.defineEx('ndrums', 'ndrums', () => handlers.onHideDrums?.());
+
   // :peruse — append (or refresh) a browsable index of every sound the file's
   // samples() calls import. See src/editor/peruse.js. Full name as the
   // ex-prefix: `:p` is stock vim's :print, and this is not that.
   Vim.defineEx('peruse', 'peruse', () => handlers.onPeruse?.());
+
+  // :learn [term] — open the offline mirror of the strudel.cc docs in a new
+  // tab, searched for `term` when one is given (see OFFLINE.md). Full name as
+  // the ex-prefix, so `:l` is left alone.
+  Vim.defineEx('learn', 'learn', (cm, params) => handlers.onLearn?.(params.argString));
 
   // --- networked play ------------------------------------------------------
 
@@ -267,6 +319,9 @@ export function createEditor({
   onHideMini,
   onShowBanks,
   onHideBanks,
+  onShowDrums,
+  onHideDrums,
+  onLearn,
   onStatus,
   vimMode = false,
 }) {
@@ -278,6 +333,9 @@ export function createEditor({
   handlers.onHideMini = onHideMini;
   handlers.onShowBanks = onShowBanks;
   handlers.onHideBanks = onHideBanks;
+  handlers.onShowDrums = onShowDrums;
+  handlers.onHideDrums = onHideDrums;
+  handlers.onLearn = onLearn;
   handlers.onStatus = onStatus;
   registerVimCommands();
 
@@ -288,7 +346,8 @@ export function createEditor({
         key: 'Mod-Enter',
         preventDefault: true,
         run: (view) => {
-          onEvaluate?.(view.state.doc.toString());
+          const { code, offset } = selectionOrAll(view);
+          onEvaluate?.(code, offset);
           return true;
         },
       },

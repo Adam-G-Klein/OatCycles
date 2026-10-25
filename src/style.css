@@ -144,6 +144,28 @@ button:hover {
   color: var(--accent);
 }
 
+#midi-bpm-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted);
+}
+
+#midi-bpm {
+  width: 3.5rem;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+#midi-bpm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Note-on activity dot: dim by default, lights up (with the note name) on a
    note-on event, then fades back. */
 #midi-activity {
@@ -748,7 +770,121 @@ button:hover {
   color: var(--fg);
 }
 
-/* Local sample banks (src/editor/banks.js), the third occupant of the bottom
+/* Drum-kit reference (src/editor/drumkit.js) — :drums shows, :ndrums hides.
+   Same dock, same content-driven height ceiling, and it borrows the cheatsheet's
+   header and multi-column card packing. What's new here is the play buttons. */
+#drumkit-ref {
+  flex: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.6rem 0.9rem 0.9rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+#drumkit-ref[hidden] {
+  display: none;
+}
+
+.drumkit-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.drumkit-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+}
+
+.drumkit-grid {
+  columns: 20rem;
+  column-gap: 0.6rem;
+}
+
+.drumkit-card {
+  break-inside: avoid;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.7rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.drumkit-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.drumkit-part + .drumkit-part {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.drumkit-term {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.drumkit-abbr {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: #9ece6a;
+  white-space: nowrap;
+}
+
+.drumkit-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.drumkit-note {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.drumkit-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+/* Each example plays sound on click — a control, styled like a code chip, with
+   the same hover/focus affordance as the bank cards. */
+.drumkit-example {
+  padding: 0.2rem 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.drumkit-example:hover,
+.drumkit-example:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Local sample banks (src/editor/banks.js), the fourth occupant of the bottom
    dock — :banks shows, :nbanks hides. Same [hidden] on/off and the same
    content-driven height with a ceiling as the cheatsheet above. */
 #banks-ref {
